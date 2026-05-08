@@ -1,0 +1,51 @@
+name: Dev Build Check
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  build-check:
+    runs-on: ubuntu-latest
+    container:
+      image: node:20-alpine
+    steps:
+      - name: Install Git
+        run: apk add --no-cache git
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify Firebase Environment Variables
+        shell: sh
+        run: |
+          MISSING=0
+          if [ -z "$VITE_FIREBASE_API_KEY" ]; then echo "::error::VITE_FIREBASE_API_KEY is missing from Secrets"; MISSING=1; fi
+          if [ -z "$VITE_FIREBASE_AUTH_DOMAIN" ]; then echo "::error::VITE_FIREBASE_AUTH_DOMAIN is missing from Secrets"; MISSING=1; fi
+          if [ -z "$VITE_FIREBASE_PROJECT_ID" ]; then echo "::error::VITE_FIREBASE_PROJECT_ID is missing from Secrets"; MISSING=1; fi
+          if [ -z "$VITE_FIREBASE_APP_ID" ]; then echo "::error::VITE_FIREBASE_APP_ID is missing from Secrets"; MISSING=1; fi
+          
+          if [ $MISSING -eq 1 ]; then
+            echo "Build failed: Required Firebase environment variables are not defined in GitHub Secrets."
+            exit 1
+          fi
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build project
+        run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_GEMINI_KEY: ${{ secrets.VITE_GEMINI_KEY }}
+          VITE_OPENWEATHER_KEY: ${{ secrets.VITE_OPENWEATHER_KEY }}
+          VITE_ORS_API_KEY: ${{ secrets.VITE_ORS_API_KEY }}
