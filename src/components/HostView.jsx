@@ -4,6 +4,7 @@ import { db, sessionsCollection } from '../services/firebase';
 import { Share2, ArrowLeft, Loader2, Copy, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { MapView } from './MapView';
+import { runRouteIntelligence } from '../agents';
 
 export default function HostView() {
   const [sessionId, setSessionId] = useState('');
@@ -31,6 +32,8 @@ export default function HostView() {
 
       try {
         await setDoc(doc(sessionsCollection, newSessionId), newSession);
+        // Fire and forget AI intelligence to prevent blocking initialization
+        runRouteIntelligence(newSessionId).catch(err => console.error("Initial AI run failed:", err));
       } catch (err) {
         console.error("Failed to init session:", err);
       } finally {

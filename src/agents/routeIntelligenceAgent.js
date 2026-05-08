@@ -5,26 +5,28 @@ import { collection, getDocs, updateDoc, doc } from "firebase/firestore";
 import { getWeather, isRaining } from "../services/weatherService";
 import { runDelayDetection } from "./delayAgent";
 
-const buildPrompt = (segments, weather, hour) => `
+const buildPrompt = (segments, weather, hour, isReroute) => `
 You are a local traffic AI for Bangalore.
-Generate a concise, specific navigation warning for a driver about to start their route.
+Generate a concise, specific navigation insight for a driver.
+${isReroute ? "CONTEXT: The driver has just dynamically reshaped their route based on community intelligence." : ""}
 
-High-avoid road segments: ${JSON.stringify(segments)}
+High-avoid road segments nearby: ${JSON.stringify(segments)}
 Current weather: ${weather}
 Hour of day (24h): ${hour}
 
 Rules:
 - Max 20 words
 - Be specific — mention actual location names from the segment data
+- If isReroute is true, respond with an insight like "Community-corrected route actively avoids recently reported congestion."
 - If hour is 7-10 or 15-18, mention school/office traffic
-- If weather has rain, mention flooding risk on known flood segments
+- If weather has rain, mention flooding risk
 - If no significant issues, say "Route looks clear based on community data."
 
 Respond ONLY with valid JSON:
 { "warning_text": "your warning here" }
 `;
 
-export async function runRouteIntelligence(sessionDocId) {
+export async function runRouteIntelligence(sessionDocId, isReroute = false) {
   try {
     const weather = await getWeather();
     const raining = await isRaining();
@@ -39,10 +41,10 @@ export async function runRouteIntelligence(sessionDocId) {
 
     let warningText = "Route looks clear based on community data.";
 
-    if (highAvoid.length > 0 || raining) {
+    if (highAvoid.length > 0 || raining || isReroute) {
       const result = await safeGenerate(
         model,
-        buildPrompt(highAvoid, weather, hour)
+        buildPrompt(highAvoid, weather, hour, isReroute)
       );
       warningText = result.warning_text;
     }

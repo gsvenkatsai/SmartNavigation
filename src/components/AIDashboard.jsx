@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { db, reportsCollection } from '../services/firebase';
 import { doc, onSnapshot, addDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { ArrowLeft, AlertTriangle, MessageSquare, CheckCircle, Clock, ShieldAlert, Send, Info, X, Bot, Zap } from 'lucide-react';
+import { runWhyAvoidAgent } from '../agents';
 
 export default function AIDashboard() {
   const [reports, setReports] = useState([]);
@@ -49,7 +50,7 @@ export default function AIDashboard() {
     setIsSubmitting(true);
     try {
       await addDoc(reportsCollection, {
-        segment_id: "domlur_1",
+        segment_id: "sony-signal-02",
         report_text: reportInput.trim(),
         created_at: serverTimestamp(),
         ai_category: "", // Triggers AI Agent
@@ -105,10 +106,15 @@ export default function AIDashboard() {
                 <span>Segment Analysis</span>
               </div>
               <button 
-                onClick={() => setShowWhyAvoid(!showWhyAvoid)}
+                onClick={async () => {
+                  if (!showWhyAvoid) {
+                    await runWhyAvoidAgent('sony-signal-02', 'session-host-guest-101');
+                  }
+                  setShowWhyAvoid(!showWhyAvoid);
+                }}
                 className="text-[10px] font-bold text-indigo-400 bg-indigo-400/10 px-3 py-1.5 rounded-full hover:bg-indigo-400/20 transition active:scale-95"
               >
-                {showWhyAvoid ? "Hide" : "Simulate Click"}
+                {showWhyAvoid ? "Hide" : "Run AI Analysis"}
               </button>
             </div>
             {showWhyAvoid && (

@@ -52,14 +52,16 @@ export function generateSegmentId(lat1, lng1, lat2, lng2) {
 }
 
 /**
- * Extract segment IDs from an array of waypoints.
- * Returns segment_id for each consecutive pair.
+ * Extract segment IDs from a geometry (array of [lat, lng] or {lat, lng}).
+ * Uses sampling to ensure road segments are reasonably long and follow curves.
  */
-export function extractSegmentsFromRoute(waypoints) {
+export function extractSegmentsFromRoute(points, samplingRate = 5) {
   const segmentIds = [];
-  for (let i = 0; i < waypoints.length - 1; i++) {
-    const { lat: lat1, lng: lng1 } = waypoints[i];
-    const { lat: lat2, lng: lng2 } = waypoints[i + 1];
+  const normalized = points.map(p => Array.isArray(p) ? { lat: p[0], lng: p[1] } : p);
+  
+  for (let i = 0; i < normalized.length - samplingRate; i += samplingRate) {
+    const { lat: lat1, lng: lng1 } = normalized[i];
+    const { lat: lat2, lng: lng2 } = normalized[i + samplingRate];
     segmentIds.push(generateSegmentId(lat1, lng1, lat2, lng2));
   }
   return segmentIds;

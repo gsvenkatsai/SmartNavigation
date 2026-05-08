@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   // Ensure Leaflet assets are handled correctly
   optimizeDeps: {
-    include: ["leaflet", "leaflet-routing-machine"],
+    include: ["leaflet"],
   },
   // Allow .env.local to be read
   envPrefix: "VITE_",

@@ -1,261 +1,48 @@
-// DraggableRoute.jsx — Robust LRM + ORS Implementation with Stability Guards
-// - Resolves 'length' TypeError with defensive checks
-// - Uses L.latLng() factory for strict type safety
-// - Implements L.Routing.openrouteservice with error handling
+// DraggableRoute.jsx — True Drag-Based Route Shaping Implementation
+// Implements Google Maps style route dragging with hidden shaping points
+// Replaces the arbitrary waypoint system with a premium, road-constrained interaction
 
-import { useEffect, useRef, useState } from "react";
-import { useMap } from "react-leaflet";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { Polyline, Marker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
-import "leaflet-routing-machine";
-import "leaflet-routing-machine/dist/leaflet-routing-machine.css";
-
 import { extractSegmentsFromRoute } from "../utils/routeHelpers";
+import { getNearbyPOIs } from "../services/orsService";
 import { useFirestoreDoc } from "../hooks/useFirestore";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "../services/firebase";
 
 const ORS_KEY = import.meta.env.VITE_ORS_API_KEY;
 
-// Custom icons
+// Premium Icons
 const createMarkerIcon = (color, label) =>
   L.divIcon({
-    className: "",
+    className: "custom-marker",
     html: `<div style="
-      width:32px;height:32px;border-radius:50% 50% 50% 0;
-      background:${color};border:3px solid white;
-      transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4);
+      width:24px;height:24px;border-radius:50% 50% 50% 0;
+      background:${color};border:2px solid white;
+      transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.3);
       display:flex;align-items:center;justify-content:center;">
-      <span style="transform:rotate(45deg);color:white;font-size:11px;font-weight:bold;">${label}</span>
+      <span style="transform:rotate(45deg);color:white;font-size:10px;font-weight:bold;">${label}</span>
     </div>`,
-    iconSize: [32, 32],
-    iconAnchor: [16, 32],
+    iconSize: [24, 24],
+    iconAnchor: [12, 24],
   });
 
-const startIcon = createMarkerIcon("#22c55e", "A");
-const endIcon   = createMarkerIcon("#ef4444", "B");
-const viaIcon   = L.divIcon({
-  className: "",
-  html: `<div style="width:14px;height:14px;border-radius:50%;background:#6366f1;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div>`,
-  iconSize: [14, 14],
-  iconAnchor: [7, 7],
+const startIcon = createMarkerIcon("#22c55e", "S");
+const endIcon   = createMarkerIcon("#ef4444", "D");
+
+// Ghost Shaping Point Icon
+const ghostIcon = L.divIcon({
+  className: "shaping-point-ghost",
+  html: `<div style="
+    width:12px;height:12px;border-radius:50%;
+    background:rgba(99, 102, 241, 0.8);border:2px solid #fff;
+    box-shadow:0 0 15px rgba(99, 102, 241, 0.6);
+    cursor: grabbing;
+  "></div>`,
+  iconSize: [12, 12],
+  iconAnchor: [6, 6],
 });
-
-/**
- * Custom ORS Router for Leaflet Routing Machine
- */
-L.Routing.OpenRouteService = L.Class.extend({
-  initialize: function(apiKey, options) {
-    this._apiKey = apiKey;
-    this._options = L.extend({ timeout: 30000 }, options);
-  },
-
-  route: async function(waypoints, callback, context) {
-    // Guard: Basic validation of input waypoints
-    if (!waypoints || waypoints.length < 2 || !this._apiKey) {
-      console.warn("[ORSRouter] Invalid waypoints or missing API key");
-      callback.call(context, new Error("Invalid input for routing"));
-      return;
-    }
-
-    const points = waypoints.map(w => [w.latLng.lng, w.latLng.lat]); // ORS wants [lng, lat]
-    
-    try {
-      let url, body, method;
-      
-      if (points.length === 2) {
-        method = 'GET';
-        url = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${this._apiKey}&start=${points[0][0]},${points[0][1]}&end=${points[1][0]},${points[1][1]}&radiuses=1000,1000`;
-      } else {
-        method = 'POST';
-        url = 'https://api.openrouteservice.org/v2/directions/driving-car/geojson';
-        body = JSON.stringify({ 
-          coordinates: points,
-          radiuses: points.map(() => 1000)
-        });
-      }
-
-      const res = await fetch(url, {
-        method,
-        headers: body ? { 'Content-Type': 'application/json', 'Authorization': this._apiKey } : {},
-        body,
-        signal: AbortSignal.timeout(this._options.timeout)
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`ORS API ${res.status}: ${errText}`);
-      }
-
-      const data = await res.json();
-      const feature = data.features?.[0];
-      
-      if (!feature || !feature.geometry || !feature.geometry.coordinates) {
-        console.warn("[ORS Router] Invalid ORS response: missing geometry. Returning fallback empty route.");
-        callback.call(context, null, []);
-        return;
-      }
-
-      const coords = feature.geometry.coordinates.map(c => L.latLng(c[1], c[0]));
-      const summary = feature.properties?.summary || { distance: 0, duration: 0 };
-
-      const route = {
-        name: "SmartNav Route",
-        summary: { totalDistance: summary.distance, totalTime: summary.duration },
-        coordinates: coords,
-        waypoints: waypoints,
-        instructions: []
-      };
-
-      callback.call(context, null, [route]);
-    } catch (err) {
-      console.error("[ORS Router Error]:", err);
-      callback.call(context, null, []);
-    }
-  }
-});
-
-L.Routing.openrouteservice = function(apiKey, options) {
-  return new L.Routing.OpenRouteService(apiKey, options);
-};
-
-function RoutingEngine({
-  waypoints,
-  sessionId,
-  isHost,
-  onRouteReady,
-  onRouteUpdated,
-  onSegmentDragged,
-}) {
-  const map = useMap();
-  const instance = useRef(null);
-  const syncTimeoutRef = useRef(null);
-  const { data: sessionData } = useFirestoreDoc("sessions", sessionId);
-  const [hasError, setHasError] = useState(false);
-
-  useEffect(() => {
-    if (!waypoints || waypoints.length < 2) return;
-
-    if (instance.current) {
-      try {
-        map.removeControl(instance.current);
-      } catch (e) {
-        console.warn("[LRM Cleanup Warning]:", e);
-      }
-    }
-
-    let routingControl;
-    
-    try {
-      routingControl = L.Routing.control({
-        plan: L.Routing.plan(waypoints.map(wp => L.latLng(wp.lat, wp.lng)), {
-          createMarker: (i, wp, n) => {
-            return L.marker(wp.latLng, {
-              draggable: isHost,
-              icon: i === 0 ? startIcon : (i === n - 1 ? endIcon : viaIcon)
-            });
-          },
-          addWaypoints: isHost,
-          draggableWaypoints: isHost,
-        }),
-        router: L.Routing.openrouteservice(ORS_KEY, { timeout: 30000 }),
-        lineOptions: {
-          styles: [{ color: "#6366f1", weight: 6, opacity: 0.85 }],
-          addWaypoints: isHost
-        },
-        show: false,
-        addWaypoints: isHost
-      }).addTo(map);
-
-      instance.current = routingControl;
-
-      // waypointschanged event: Update Firestore live_waypoints
-      routingControl.on('waypointschanged', (e) => {
-        if (!isHost || !sessionId || !e.waypoints) return;
-        
-        const validWaypoints = e.waypoints.filter(w => w && w.latLng);
-        if (validWaypoints.length < 2) return;
-
-        const wps = validWaypoints.map(w => ({
-          lat: w.latLng.lat,
-          lng: w.latLng.lng
-        }));
-
-        // Throttled sync to prevent race conditions during remount
-        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-        syncTimeoutRef.current = setTimeout(async () => {
-          try {
-            const sessionRef = doc(db, "sessions", sessionId);
-            await updateDoc(sessionRef, {
-              live_waypoints: wps
-            });
-            console.log("[LRM] Waypoints updated in Firestore");
-            onRouteUpdated?.(wps);
-            onSegmentDragged?.(extractSegmentsFromRoute(wps));
-          } catch (err) {
-            console.error("[LRM] Firestore update failed:", err);
-          }
-        }, 1000);
-      });
-
-      routingControl.on('routeselected', async (e) => {
-        // Defensive check before accessing coordinates length
-        if (!e.route || !e.route.coordinates) return;
-        
-        onRouteReady?.();
-        if (isHost && sessionId) {
-          const geometry = e.route.coordinates.map(c => [c.lat, c.lng]);
-          try {
-            const sessionRef = doc(db, "sessions", sessionId);
-            await updateDoc(sessionRef, {
-              route_geometry: JSON.stringify(geometry)
-            });
-          } catch (err) {
-            console.error("[LRM] Geometry sync failed:", err);
-          }
-        }
-      });
-    } catch (err) {
-      console.error("[LRM Initialization Error]:", err);
-    }
-
-    return () => {
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      if (instance.current) {
-        try {
-          map.removeControl(instance.current);
-        } catch (e) {
-          console.warn("[LRM Cleanup Warning]:", e);
-        }
-        instance.current = null;
-      }
-    };
-  }, [map, isHost, sessionId]); // waypoints change triggers remount via key prop in parent
-
-  // Guest Sync
-  useEffect(() => {
-    if (!isHost && sessionData?.live_waypoints && instance.current) {
-      try {
-        const newWps = sessionData.live_waypoints.map(w => L.latLng(w.lat, w.lng));
-        const currentWps = instance.current.getWaypoints().map(w => w.latLng);
-        
-        const hasChanged = newWps.length !== currentWps.length || 
-                           newWps.some((wp, i) => !wp.equals(currentWps[i]));
-
-        if (hasChanged) {
-          instance.current.setWaypoints(newWps);
-        }
-      } catch (err) {
-        console.error("[LRM Guest Sync Error]:", err);
-      }
-    }
-  }, [isHost, sessionData?.live_waypoints]);
-
-  if (hasError) {
-    return <div className="absolute top-4 left-4 z-[1000] p-2 bg-red-100 text-red-600 rounded shadow">Error loading route</div>;
-  }
-
-  return null;
-}
 
 export function DraggableRoute({
   source,
@@ -266,19 +53,248 @@ export function DraggableRoute({
   onRouteUpdated,
   onSegmentDragged,
 }) {
-  const waypoints = (source && destination)
-    ? [L.latLng(source.lat, source.lng), L.latLng(destination.lat, destination.lng)]
-    : null;
+  const map = useMap();
+  const [shapingPoint, setShapingPoint] = useState(null);
+  const [ghostPoint, setGhostPoint] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [geometry, setGeometry] = useState([]);
+  const [pois, setPois] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(null);
+  
+  const syncTimeoutRef = useRef(null);
+  const lastFetchedWpsRef = useRef("");
 
-  return waypoints && waypoints.length >= 2 && ORS_KEY ? (
-    <RoutingEngine
-      key={`${source.lat}-${source.lng}-${destination.lat}-${destination.lng}`}
-      waypoints={waypoints}
-      sessionId={sessionId}
-      isHost={isHost}
-      onRouteReady={onRouteReady}
-      onRouteUpdated={onRouteUpdated}
-      onSegmentDragged={onSegmentDragged}
-    />
-  ) : null;
+  const { data: sessionData } = useFirestoreDoc("sessions", sessionId);
+
+  // Sync shaping point from Firestore (for Guest view)
+  useEffect(() => {
+    if (!isHost && sessionData?.shaping_point) {
+      setShapingPoint(sessionData.shaping_point);
+    }
+  }, [isHost, sessionData?.shaping_point]);
+
+  // Handle Dragging Interactions
+  useEffect(() => {
+    if (!isDragging || !isHost) return;
+
+    const onMouseMove = (e) => {
+      setGhostPoint(e.latlng);
+    };
+
+    const onMouseUp = async (e) => {
+      setIsDragging(false);
+      const finalizedPoint = { lat: e.latlng.lat, lng: e.latlng.lng };
+      setShapingPoint(finalizedPoint);
+      setGhostPoint(null);
+      map.dragging.enable();
+
+      // Commit to Firestore
+      if (sessionId) {
+        try {
+          const sessionRef = doc(db, "sessions", sessionId);
+          await updateDoc(sessionRef, {
+            shaping_point: finalizedPoint
+          });
+          console.log("[RouteShaper] Shaping point committed");
+        } catch (err) {
+          console.error("[RouteShaper] Sync failed:", err);
+        }
+      }
+    };
+
+    map.on('mousemove', onMouseMove);
+    map.on('mouseup', onMouseUp);
+
+    return () => {
+      map.off('mousemove', onMouseMove);
+      map.off('mouseup', onMouseUp);
+    };
+  }, [isDragging, isHost, map, sessionId]);
+
+  // Fetch Route from ORS
+  useEffect(() => {
+    const API_KEY = import.meta.env.VITE_ORS_API_KEY;
+    if (!API_KEY || !source || !destination) return;
+
+    const waypoints = [
+      { lat: source.lat, lng: source.lng },
+      ...(shapingPoint ? [shapingPoint] : []),
+      { lat: destination.lat, lng: destination.lng }
+    ];
+
+    // Prevent duplicate fetches
+    const wpString = JSON.stringify(waypoints);
+    if (wpString === lastFetchedWpsRef.current) return;
+    lastFetchedWpsRef.current = wpString;
+
+    const fetchRoute = async () => {
+      setIsLoading(true);
+      setFetchError(null);
+      try {
+        const url = 'https://api.openrouteservice.org/v2/directions/driving-car/geojson';
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': API_KEY
+          },
+          body: JSON.stringify({
+            coordinates: waypoints.map(w => [w.lng, w.lat])
+          })
+        });
+
+        if (!res.ok) throw new Error(`ORS Error: ${res.status}`);
+
+        const data = await res.json();
+        const coords = data.features[0].geometry.coordinates.map(c => [c[1], c[0]]);
+        setGeometry(coords);
+
+        const summary = data.features[0].properties.summary;
+        onRouteReady?.({ totalDistance: summary.distance, totalTime: summary.duration });
+
+        if (coords.length > 0) {
+          map.fitBounds(coords, { padding: [50, 50], animate: true });
+        }
+
+        // ORS A-Z: POIs (Fetch nearby amenities for local context)
+        if (shapingPoint) {
+          try {
+            const poiData = await getNearbyPOIs(shapingPoint.lat, shapingPoint.lng);
+            setPois(poiData.features || []);
+          } catch (err) {
+            console.error("POI search failed:", err);
+          }
+        }
+
+        // Finalize state updates
+        onRouteUpdated?.(waypoints);
+        onSegmentDragged?.(extractSegmentsFromRoute(coords, 10)); // Extract segments from the actual road geometry
+
+        // Sync Geometry for Guest
+        if (isHost && sessionId) {
+          await updateDoc(doc(db, "sessions", sessionId), {
+            route_geometry: JSON.stringify(coords)
+          });
+        }
+      } catch (err) {
+        console.error("[RouteShaper] Fetch failed:", err);
+        setFetchError("Route calculation failed. Try a different path.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchRoute();
+  }, [source, destination, shapingPoint, isHost, sessionId, map, onRouteReady, onRouteUpdated, onSegmentDragged]);
+
+  if (!source || !destination) return null;
+
+  return (
+    <>
+      {/* Visual Error Message */}
+      {fetchError && (
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[1000] bg-red-900/80 backdrop-blur text-white px-4 py-2 rounded-lg border border-red-500 text-xs shadow-xl">
+          {fetchError}
+        </div>
+      )}
+
+      {/* Main Route Polyline */}
+      {geometry.length > 0 && (
+        <Polyline
+          positions={geometry}
+          pathOptions={{
+            color: "#6366f1",
+            weight: 6,
+            opacity: isDragging ? 0.3 : 0.85,
+            lineJoin: 'round'
+          }}
+          eventHandlers={{
+            mousedown: (e) => {
+              if (!isHost) return;
+              L.DomEvent.stopPropagation(e);
+              setIsDragging(true);
+              setGhostPoint(e.latlng);
+              map.dragging.disable();
+            },
+            mouseover: (e) => {
+              if (isHost) e.target.setStyle({ color: '#818cf8', weight: 8 });
+            },
+            mouseout: (e) => {
+              if (isHost) e.target.setStyle({ color: '#6366f1', weight: 6 });
+            }
+          }}
+        >
+          {isHost && !shapingPoint && (
+            <Tooltip permanent={false} direction="top" opacity={0.9}>
+              <span className="text-[10px] font-bold text-indigo-600">Drag route to reshape</span>
+            </Tooltip>
+          )}
+        </Polyline>
+      )}
+
+      {/* Ghost Preview during Drag */}
+      {isDragging && ghostPoint && (
+        <>
+          <Polyline
+            positions={[
+              [source.lat, source.lng],
+              [ghostPoint.lat, ghostPoint.lng],
+              [destination.lat, destination.lng]
+            ]}
+            pathOptions={{
+              color: "#818cf8",
+              weight: 3,
+              dashArray: "10, 10",
+              opacity: 0.6
+            }}
+          />
+          <Marker position={ghostPoint} icon={ghostIcon} />
+        </>
+      )}
+
+      {/* ORS A-Z: Nearby POIs (Contextual Intelligence) */}
+      {pois.map((poi, i) => (
+        <Marker 
+          key={i} 
+          position={[poi.geometry.coordinates[1], poi.geometry.coordinates[0]]}
+          icon={L.divIcon({
+            className: "",
+            html: `<div style="background:#eab308;width:8px;height:8px;border-radius:50%;border:2px solid white;box-shadow:0 0 10px rgba(234, 179, 8, 0.6);"></div>`
+          })}
+        >
+          <Tooltip direction="top" offset={[0, -5]}>
+            <span className="text-[10px] font-bold text-gray-200">Amenity: {poi.properties.label || "Service"}</span>
+          </Tooltip>
+        </Marker>
+      ))}
+
+      {/* Origin & Destination Markers */}
+      <Marker position={[source.lat, source.lng]} icon={startIcon} />
+      <Marker position={[destination.lat, destination.lng]} icon={endIcon} />
+
+      {/* Hidden Shaping Point (Visible only as a subtle handle) */}
+      {shapingPoint && !isDragging && isHost && (
+        <Marker
+          position={[shapingPoint.lat, shapingPoint.lng]}
+          icon={ghostIcon}
+          draggable={true}
+          eventHandlers={{
+            dragstart: () => {
+              setIsDragging(true);
+              map.dragging.disable();
+            },
+            dragend: (e) => {
+              const pos = e.target.getLatLng();
+              setShapingPoint({ lat: pos.lat, lng: pos.lng });
+              setIsDragging(false);
+              map.dragging.enable();
+            }
+          }}
+        >
+           <Tooltip direction="bottom">Current shaping point</Tooltip>
+        </Marker>
+      )}
+    </>
+  );
 }

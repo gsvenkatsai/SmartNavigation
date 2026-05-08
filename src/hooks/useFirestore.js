@@ -8,7 +8,9 @@ import {
   addDoc,
   setDoc,
   serverTimestamp,
-  increment
+  increment,
+  writeBatch,
+  getDocs
 } from "firebase/firestore";
 import { db } from "../services/firebase";
 
@@ -90,6 +92,25 @@ export async function writeSegmentPreference(segmentId, type = "prefer") {
     );
   } catch (error) {
     console.error("Error writing segment preference:", error);
+    throw error;
+  }
+}
+
+/**
+ * Utility to clear all community heatmap data for a fresh demo.
+ */
+export async function clearCommunityData() {
+  try {
+    const colRef = collection(db, "segments");
+    const snapshot = await getDocs(colRef);
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+    await batch.commit();
+    console.log("Community data cleared successfully");
+  } catch (error) {
+    console.error("Error clearing community data:", error);
     throw error;
   }
 }

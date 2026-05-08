@@ -57,7 +57,13 @@ export function SegmentHeatmap() {
           <Polyline
             key={seg.id}
             positions={coords}
-            pathOptions={{ color, weight: 6, opacity: 0.7 }}
+            pathOptions={{ 
+              color, 
+              weight: 3, 
+              opacity: 0.4,
+              lineCap: 'round',
+              dashArray: score > 10 ? '1, 5' : null // Dashed for high preference
+            }}
           >
             <Tooltip sticky>
               <div className="text-xs font-medium bg-gray-900 text-gray-100 p-1 rounded">

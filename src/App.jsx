@@ -1,13 +1,20 @@
 // App.jsx — Root component with Routing
 
+import { useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Home from "./components/Home";
 import HostView from "./components/HostView";
 import GuestView from "./components/GuestView";
 import AIDashboard from "./components/AIDashboard";
 import { MapView } from "./components/MapView";
+import { startReporterAgent } from "./agents";
 
 export default function App() {
+  useEffect(() => {
+    const unsub = startReporterAgent();
+    return () => unsub && unsub();
+  }, []);
+
   return (
     <Router>
       <div className="h-screen flex flex-col bg-gray-950 overflow-hidden text-gray-100">
