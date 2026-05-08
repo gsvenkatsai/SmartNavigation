@@ -1,0 +1,119 @@
+SmartNav — Complete Final Plan
+
+One Line Pitch
+What if the person who knows your street could navigate for you — and teach the map while doing it?
+
+The Problem
+Google Maps knows roads. It doesn't know that Domlur flyover jams every school morning. It doesn't know the lane behind Sony Signal floods in monsoon. It doesn't know the shortcut every Indiranagar auto driver uses.
+That knowledge lives in people's heads and dies there. We extract it, store it, and make every future journey smarter.
+
+What We're Building
+Three things working together:
+Community Rerouting — locals edit routes, the map learns permanently.
+Live Host-Guest Navigation — a local guides a stranger in real time, like a human GPS.
+Multi-Agent Claude AI Pipeline — four specialized agents that analyze, reason, communicate, and learn autonomously.
+
+The Wow Factors
+Wow 1 — A Human Can Drive Your Route For You
+A stranger in Bangalore is stuck. They share a link. A local opens it, sees their route, drags it away from the blocked road. The stranger's map redraws in real time. No phone call. No typing. Just a local moving a line on a map. Google Maps cannot do this. Waze cannot do this. Nobody has done this for India.
+Wow 2 — Every Live Session Teaches the Map Autonomously
+When the host-guest session ends, a background AI agent wakes up on its own. It reads the full session log, decides which segments to update and by how much, and writes back to Firestore without any human triggering it. The local didn't just help one person. An AI made sure that help compounded for every future user on that corridor forever.
+Wow 3 — Three Specialized Agents Talk To Each Other Before You Start Driving
+The moment you enter source and destination, a pipeline of three agents fires. Agent 1 reads raw segment data and produces a risk assessment. Agent 2 reasons over that assessment, applies time-of-day context, and ranks hazards by confidence. Agent 3 reads the ranked list and speaks to you plainly. At 8am on a route touching Domlur: "School traffic likely in 10 minutes. 17 locals avoid this stretch at this hour. Alternate available." Three agents worked together. You saw one sentence.
+Wow 4 — AI Classifies Blocked Roads Intelligently
+When someone reports a blocked road, the agent pipeline doesn't just save the text. It reads the reason, classifies severity, estimates how long it will affect traffic, and auto-flags the segment. A flooded road is treated differently from a pothole. A construction block is treated differently from an accident. The map responds with intelligence, not just storage.
+Wow 5 — Confidence Scoring the Community Knows to Trust
+The summary you see doesn't just tell you what locals think. It tells you how much to trust it. "High confidence — 23 edits confirm avoid Domlur 8 to 10am. Low confidence — 1 flood report near Sony Signal, unverified." This is what separates a real system from a chatbot glued to a map.
+Wow 6 — City Scale Intelligence With No ML
+No model training. No data science. Pure frequency counting on road segments. Every drag, every report, every reroute increments a counter. When trust score crosses a threshold the segment gets badged as Community Preferred. It works at city scale because it operates on segments not source-destination pairs. Every resident of Bangalore who passes Domlur flyover benefits from every local who ever avoided it.
+
+The Multi-Agent Pipeline
+This is the core AI architecture. Four agents, each with one job, working together.
+Agent 1 — Route Intelligence Agent
+Runs silently the moment a user enters source and destination. Its only job is data analysis. It receives the corridor segments, time of day, avoid counts, prefer counts, blocked report counts, and note timestamps. It produces a structured JSON risk assessment — which segments are risky, which are preferred, how fresh the data is, what the overall corridor health looks like. It does not talk to the user. It does not reason or explain. It only produces clean structured data for Agent 2.
+Agent 2 — Hazard Reasoning Agent
+Receives Agent 1's JSON risk assessment. Its job is reasoning and context. It applies time-of-day patterns — school hours, peak traffic windows, monsoon flags. It weighs recent reports more than old ones. It separates verified patterns from single unconfirmed reports. It ranks hazards by severity and assigns confidence scores — high, medium, or low — based on data volume and recency. It outputs a ranked hazard list as JSON. It still does not talk to the user. It only reasons and passes forward.
+Agent 3 — User Communication Agent
+Receives Agent 2's ranked hazard list. Its only job is speaking to the user clearly. It generates the proactive route warning before the journey starts, the confidence-scored summary card on route load, and the severity label when a blocked road is reported. It is the only agent the user ever sees or hears. Everything before it was invisible machinery.
+Agent 4 — Passive Learning Agent
+This agent does not run in the user flow. It wakes up autonomously when a Mode 2 session ends. It reads the full session log — every drag, every waypoint change, every segment touched by the host. It decides which segments should have scores updated and by how much. It flags any segment that looks like a new emerging pattern. It writes directly back to Firestore. No human triggered it. It ran because an event happened, made a decision, and took action. That is genuine agentic behavior.
+
+How The Agent Pipeline Is Built
+No external framework needed. Three sequential API calls where each output feeds the next.
+Agent 1 prompt tells Claude it is a route data analyst, gives it the raw segment JSON, and asks for a structured risk assessment JSON only — no explanation, no prose.
+Agent 2 prompt tells Claude it is a hazard reasoning engine, gives it Agent 1's JSON output, and asks for a ranked hazard list with confidence scores as JSON only.
+Agent 3 prompt tells Claude it is a navigation assistant speaking to a driver, gives it Agent 2's ranked list, and asks for a clear 2 to 3 sentence warning in plain English.
+Agent 4 runs on session end as a Firebase Cloud Function, reads the session document, calls Claude with the full session log, and asks it to return a JSON object of segment score updates to write back.
+Total extra build time: 2 to 3 hours on top of what Person 4 was already doing.
+
+How It Works End to End
+Mode 1 — Community Rerouting
+User enters source and destination. OpenRouteService returns a standard route. Agent pipeline fires immediately — Agent 1 analyzes segments, Agent 2 reasons over risks, Agent 3 speaks the warning to the user before they even start. User can drag the route to a better path. On drag end new waypoints are captured, route is broken into segments, each segment gets prefer count incremented in Firestore. Next user on the same corridor sees the Community Preferred badge and the confidence-scored summary.
+Mode 2 — Live Host-Guest Navigation
+Guest starts navigation and gets a session link. They share it on WhatsApp. A local opens the link and sees the guest's live route. Host drags the route away from the problem. Firebase onSnapshot fires instantly and the guest's map redraws. Guest follows the locally optimized path. When session ends Agent 4 wakes up autonomously, reads the session log, updates all affected segment scores, and writes back to Firestore. One helpful local just improved the map for everyone, with no manual data entry.
+
+Tech Stack
+Frontend — React, Vite, Tailwind CSS
+Map — React Leaflet on OpenStreetMap
+Routing — OpenRouteService API
+Route editing — Leaflet Routing Machine
+Database and real-time — Firebase Firestore with onSnapshot
+Auth — Firebase Authentication
+Background agents — Firebase Cloud Functions
+AI — Claude API, four agent calls
+Share layer — WhatsApp deep link on every route and session
+
+Firestore Schema
+Segments collection
+segment_id as hash of start and end coordinates, avoid_count, prefer_count, trust_score, blocked_reports, notes array with text and timestamp and user_id per note, agent_flags array written by Agent 4, updated_at timestamp.
+Sessions collection
+session_id, host_id, guest_id, live waypoints array updated by host in real time, route_geometry, status as active or ended, session_log array of every drag event with timestamp, created_at.
+Routes collection
+route_id, created_by, waypoints, segment_ids, upvote_count, share_url, created_at.
+Blocked roads collection
+road_id, segment_id reference, reported_by, reason text, claude_severity label, claude_estimated_duration, auto_flagged boolean, created_at.
+
+4-Person Task Split
+Person 1 — Map and Routing
+Sets up React, Vite, Leaflet, OpenStreetMap. Integrates OpenRouteService for route generation. Implements Leaflet Routing Machine for draggable routes. Captures waypoints on drag end. Deliverable: you can drag a route on a map and get new waypoints out.
+Person 2 — Community Intelligence
+Sets up Firebase and Firestore. Builds segment hashing logic. Implements avoid, prefer, and trust score counters. Queries high trust score segments on route load. Renders Community Preferred badge. Deliverable: edit a route, segment scores update, badge appears on reload.
+Person 3 — Live Session and Agent 4
+Implements Firebase Auth and session ID generation. Builds session doc creation and share link. Writes host drag waypoints to Firestore in real time with full session log. Implements guest onSnapshot listener and map redraw. Builds Agent 4 as a Firebase Cloud Function that fires on session end. Deliverable: host drags, guest map updates live, session end triggers autonomous segment updates.
+Person 4 — Agent Pipeline and UI
+Builds dark theme UI, route cards, badges, loading states, mobile responsiveness. Implements blocked road reporting flow. Builds the three-agent pipeline — Agent 1 data analysis, Agent 2 hazard reasoning, Agent 3 user communication — with proper prompts and JSON handoffs between each. Seeds demo data in Firestore. Prepares screen recording backup for demo. Deliverable: clean UI, full agent pipeline working, demo data ready.
+
+Agent Prompts
+Agent 1 prompt
+"You are a route data analyst. Given the following segment data and current time, produce a JSON risk assessment. Include segment_id, risk_level as high/medium/low, data_freshness, avoid_count, prefer_count, and trust_score for each segment. Output only valid JSON. No explanation. No prose."
+Agent 2 prompt
+"You are a hazard reasoning engine. Given this risk assessment JSON, apply time-of-day context and data confidence weighting. Output a ranked array of hazards with fields: segment_id, severity, confidence as high/medium/low, reason in one sentence, recommended_action as avoid or prefer or neutral. Output only valid JSON. No explanation. No prose."
+Agent 3 prompt
+"You are a navigation assistant speaking directly to a driver about to start their journey. Given this ranked hazard list, generate a 2 to 3 sentence plain English warning. Be specific about location and time. Include confidence level naturally in the language. Speak like a knowledgeable local, not a robot."
+Agent 4 prompt
+"You are a map learning agent. Given this session log of host drag events and segment changes, decide which segments should have their avoid_count or prefer_count incremented and by how much. Output only a JSON array of objects with segment_id, field to update, and increment value. No explanation. No prose."
+
+Demo Script — 60 Seconds
+0 to 10 seconds: Enter Indiranagar to Koramangala. It's 8am in the demo. Three agents fire silently. Agent 3 surfaces: "School traffic likely on this route. 17 locals avoid Domlur flyover at this hour. Alternate available." Say: the AI acted before the user asked.
+10 to 30 seconds: Switch to Mode 2. Guest starts navigation, shares link on WhatsApp. Host opens it on a second screen, sees the guest's live route, drags it away from a blocked road. Guest map redraws instantly. Say: this is what Google Maps cannot do.
+30 to 45 seconds: Session ends. Say: Agent 4 just woke up on its own. Show Firestore updating in real time — segment scores changing autonomously. Say: the local helped one person. The AI made it permanent for everyone.
+45 to 60 seconds: New user opens the same route. Community Preferred badge on the alternate path. Agent summary appears: "High confidence — 23 locals avoid Domlur 8 to 10am. Low confidence — 1 flood report near Sony Signal, unverified." Close: three agents worked together so this user sees one useful sentence.
+
+What To Tell Judges About The AI
+"We have four specialized agents. Agent 1 is a data analyst — it reads raw segment intelligence and outputs structured JSON. Agent 2 is a reasoning engine — it applies time-of-day context and ranks hazards by confidence. Agent 3 is the communicator — the only agent the user ever sees. Agent 4 is passive and autonomous — it wakes up when a live session ends, reads the session log, and updates the community map with no human involvement. The user never triggered it. It just acted."
+That answer will hold up under technical questioning from any judge.
+
+Seed Data Checklist Before Demo
+Indiranagar to Koramangala corridor has at least 25 community edits avoiding Domlur flyover. Trust score on that segment is above 10. At least 2 blocked road reports on Domlur with Claude severity classifications already generated and stored. The alternate lane has prefer count above 15 and shows the Community Preferred badge. One active demo session ready to launch instantly. Agent 4 Cloud Function deployed and tested. Screen recording of full flow ready as backup on a separate device.
+
+Realistic Score Estimate
+AI that takes action — 9 out of 10. Four agents, one fully autonomous.
+Multi-agent architecture — 8 out of 10. Genuine pipeline with structured handoffs between agents.
+Real tools and APIs — 9 out of 10. Firebase, OpenRouteService, Claude, WhatsApp, Leaflet all working together.
+Real problem solved — 9 out of 10. Every judge in the room has been stuck in Bangalore traffic.
+Demo quality — 9 out of 10. The live map redraw is the moment. Everything else supports it.
+Overall realistic range — 88 to 93 out of 100. Top 3 at a community track hackathon.
+
+Pitch Close
+Google Maps uses algorithms. Waze uses passive crowdsourcing. We use active human intelligence — a local who knows your street rerouting your path in real time, while four AI agents make sure that knowledge outlives the moment and helps every person who comes after.
+This is not a navigation app with an AI feature bolted on. This is a city's collective routing knowledge, made usable, made permanent, made intelligent.
