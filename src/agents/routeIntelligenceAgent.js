@@ -5,6 +5,11 @@ import { collection, getDocs, updateDoc, doc } from "firebase/firestore";
 import { getWeather, isRaining } from "../services/weatherService";
 import { runDelayDetection } from "./delayAgent";
 
+// ─── Debounce / Cache state ─────────────────────────────────────────────────
+let lastAICall = 0;
+let cachedResult = null;
+const AI_COOLDOWN_MS = 30000; // 30 seconds minimum between API calls
+
 const buildPrompt = (segments, weather, hour, isReroute) => `
 You are a local traffic AI for Bangalore.
 Generate a concise, specific navigation insight for a driver.
@@ -28,6 +33,16 @@ Respond ONLY with valid JSON:
 
 export async function runRouteIntelligence(sessionDocId, isReroute = false) {
   try {
+    // Debounce: skip if called within 30s, use cached result
+    const now = Date.now();
+    if (now - lastAICall < AI_COOLDOWN_MS && cachedResult) {
+      console.log("[RouteIntel] Debounced — using cached result");
+      await updateDoc(doc(db, "sessions", sessionDocId), {
+        ai_warning: cachedResult,
+      });
+      return;
+    }
+
     const weather = await getWeather();
     const raining = await isRaining();
     const hour = new Date().getHours();
@@ -46,8 +61,12 @@ export async function runRouteIntelligence(sessionDocId, isReroute = false) {
         model,
         buildPrompt(highAvoid, weather, hour, isReroute)
       );
-      warningText = result.warning_text;
+      warningText = result.warning_text || warningText;
     }
+
+    // Update debounce tracking
+    lastAICall = Date.now();
+    cachedResult = warningText;
 
     await updateDoc(doc(db, "sessions", sessionDocId), {
       ai_warning: warningText,
@@ -60,5 +79,11 @@ export async function runRouteIntelligence(sessionDocId, isReroute = false) {
 
   } catch (err) {
     console.error("[RouteIntel] Failed:", err);
+    // On failure, write graceful fallback to Firestore
+    try {
+      await updateDoc(doc(db, "sessions", sessionDocId), {
+        ai_warning: cachedResult || "⚡ Community data active — AI analysis on cooldown",
+      });
+    } catch {}
   }
 }

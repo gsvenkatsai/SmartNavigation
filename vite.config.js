@@ -10,13 +10,24 @@ export default defineConfig({
   },
   // Allow .env.local to be read
   envPrefix: "VITE_",
-  // Proxy ORS API requests to avoid CORS issues in browser
+  // Proxy API requests to avoid CORS issues in browser
   server: {
     proxy: {
+      // ORS API proxy — fixes CORS for all OpenRouteService calls
       "/ors-api": {
         target: "https://api.openrouteservice.org",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ors-api/, ""),
+        secure: true,
+        headers: {
+          "Accept": "application/json, application/geo+json, */*",
+        },
+      },
+      // Gemini API proxy — fixes CORS for AI agent calls
+      "/gemini-api": {
+        target: "https://generativelanguage.googleapis.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/gemini-api/, ""),
         secure: true,
       },
     },

@@ -13,11 +13,15 @@ export function VoiceAlert({ sessionId = "session-host-guest-101", autoSpeak = f
   const { data: sessionData } = useFirestoreDoc("sessions", sessionId);
   
   const text = sessionData?.ai_warning || DEFAULT_WARNING;
+  const isAICooldown = text.includes("AI analysis on cooldown") || text.includes("AI analysis temporarily");
   const lastWarningRef = useRef("");
 
   const speak = (overrideText) => {
+    const speakText = overrideText || text;
+    // Don't speak cooldown/fallback messages
+    if (speakText.includes("AI analysis on cooldown") || speakText.includes("AI analysis temporarily")) return;
     if (window.speechSynthesis.speaking) return;
-    const utterance = new SpeechSynthesisUtterance(overrideText || text);
+    const utterance = new SpeechSynthesisUtterance(speakText);
     utterance.rate = 0.9;
     utterance.pitch = 1;
     utterance.volume = 1;
@@ -52,10 +56,10 @@ export function VoiceAlert({ sessionId = "session-host-guest-101", autoSpeak = f
       className="absolute bottom-6 right-4 z-[1000] w-72"
       style={{ zIndex: 1000 }}
     >
-      <div className="bg-gray-900/90 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-amber-500/30">
+      <div className={`bg-gray-900/90 backdrop-blur-md rounded-2xl p-4 shadow-2xl border ${isAICooldown ? 'border-amber-400/50' : 'border-amber-500/30'}`}>
         {/* Header */}
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-amber-400 text-lg">⚠</span>
+          <span className="text-amber-400 text-lg">{isAICooldown ? '⚡' : '⚠'}</span>
           <span className="text-amber-400 font-semibold text-sm tracking-wide">
             Community Alert
           </span>
@@ -75,10 +79,16 @@ export function VoiceAlert({ sessionId = "session-host-guest-101", autoSpeak = f
           )}
         </div>
 
-        {/* Warning text */}
-        <p className="text-gray-300 text-xs leading-relaxed mb-3 line-clamp-3">
-          {text}
-        </p>
+        {/* Warning text — special styling for AI cooldown */}
+        {isAICooldown ? (
+          <p className="text-amber-300/90 text-xs leading-relaxed mb-3 font-medium">
+            ⚡ Community data active — AI analysis on cooldown
+          </p>
+        ) : (
+          <p className="text-gray-300 text-xs leading-relaxed mb-3 line-clamp-3">
+            {text}
+          </p>
+        )}
 
         {/* Controls */}
         <div className="flex gap-2">
