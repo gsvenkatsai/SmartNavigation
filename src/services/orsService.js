@@ -8,9 +8,11 @@ const ORS_BASE = "/ors-api";
 const getApiKey = () => import.meta.env.VITE_ORS_API_KEY;
 
 // ─── Retry wrapper with exponential backoff ──────────────────────────────────
-async function withRetry(fn, retries = 2, baseDelay = 800) {
+async function withRetry(fn, retries = 2, baseDelay = 2000) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      // Minimum 500ms delay before every ORS call to avoid burst requests
+      await new Promise(r => setTimeout(r, 500));
       return await fn();
     } catch (err) {
       if (attempt === retries) throw err;
@@ -161,39 +163,29 @@ export async function snapToRoad(lat, lng) {
 
 /**
  * 7. Segment geometry — Used by DraggableRoute to fetch road-following path
- * between two points. Returns array of [lat, lng] pairs or null on failure.
- * Includes retry logic to reduce straight-line fallbacks.
+ * between two points. Switched to OSRM demo server for faster segment lookups.
+ * Returns array of [lat, lng] pairs or null on failure.
  */
 export async function fetchSegmentGeometry(startLat, startLng, endLat, endLng) {
-  const key = getApiKey();
-  const url = `${ORS_BASE}/v2/directions/driving-car?api_key=${key}&start=${startLng},${startLat}&end=${endLng},${endLat}`;
-  
-  // Retry up to 3 times to minimize straight-line fallbacks
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const res = await fetch(url);
-      console.log(`[ORS] attempt ${attempt + 1} status:`, res.status);
+  try {
+    return await withRetry(async () => {
+      const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
       
+      const res = await fetch(url);
       if (!res.ok) {
-        if (attempt < 2) {
-          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
-          continue;
-        }
-        console.error(`[ORS] fetchSegmentGeometry failed: ${res.status}`);
-        return null;
+        throw new Error(`OSRM fetchSegmentGeometry failed: ${res.status}`);
       }
       
       const data = await res.json();
-      console.log("[ORS] response:", data);
-      return data.features[0].geometry.coordinates.map(([lng, lat]) => [lat, lng]);
-    } catch (err) {
-      if (attempt < 2) {
-        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
-        continue;
+      if (!data.routes || data.routes.length === 0) {
+        throw new Error("OSRM No routes found");
       }
-      console.error("[ORS] fetchSegmentGeometry error:", err);
-      return null;
-    }
+      
+      // OSRM returns [lng, lat], mapping to [lat, lng] for Leaflet
+      return data.routes[0].geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+    }, 2); // 2 retries (3 total attempts)
+  } catch (err) {
+    console.error("[OSRM] fetchSegmentGeometry final failure:", err);
+    return null;
   }
-  return null;
 }
