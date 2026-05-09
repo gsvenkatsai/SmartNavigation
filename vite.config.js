@@ -10,4 +10,15 @@ export default defineConfig({
   },
   // Allow .env.local to be read
   envPrefix: "VITE_",
+  // Proxy ORS API requests to avoid CORS issues in browser
+  server: {
+    proxy: {
+      "/ors-api": {
+        target: "https://api.openrouteservice.org",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ors-api/, ""),
+        secure: true,
+      },
+    },
+  },
 });

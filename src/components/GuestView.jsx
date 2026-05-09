@@ -45,9 +45,9 @@ export default function GuestView() {
 
   return (
     <div className="flex flex-col h-full bg-gray-950">
-      {/* Guest Sub-header */}
-      <div className="bg-gray-900/50 border-b border-gray-800 px-6 py-3 flex items-center justify-between z-10">
-        <div className="flex items-center gap-4">
+      {/* Guest Sub-header — mobile responsive */}
+      <div className="bg-gray-900/50 border-b border-gray-800 px-3 sm:px-6 py-2 sm:py-3 flex items-center justify-between z-10">
+        <div className="flex items-center gap-2 sm:gap-4">
           <Link to="/" className="p-2 hover:bg-gray-800 rounded-full transition-colors text-gray-400">
             <ArrowLeft size={20} />
           </Link>
@@ -65,12 +65,12 @@ export default function GuestView() {
 
         <div className="flex items-center gap-3">
           {sessionData.delay_flag && (
-            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-full px-3 py-1 animate-bounce">
+            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-full px-2 sm:px-3 py-1 animate-bounce">
               <AlertTriangle className="text-red-500" size={12} />
-              <span className="text-red-400 text-[10px] font-bold uppercase tracking-tighter">Delay Alert</span>
+              <span className="text-red-400 text-[10px] font-bold uppercase tracking-tighter hidden sm:inline">Delay Alert</span>
             </div>
           )}
-          <Link to="/dashboard" className="p-2 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-full text-indigo-400 transition-colors">
+          <Link to="/dashboard" className="p-2 bg-indigo-500/10 hover:bg-indigo-500/20 active:bg-indigo-500/30 border border-indigo-500/20 rounded-full text-indigo-400 transition-colors">
             <Activity size={18} />
           </Link>
         </div>

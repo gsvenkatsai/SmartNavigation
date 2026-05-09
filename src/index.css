@@ -1,7 +1,18 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
 
 :root {
   --sans: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+/* ─── Modal slide-in animation ─── */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-in {
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 body {
@@ -10,11 +21,15 @@ body {
   font-family: var(--sans);
   background: #030712;
   overflow: hidden;
+  /* Prevent pull-to-refresh on mobile */
+  overscroll-behavior: none;
 }
 
 /* ─── Leaflet z-index fix ─── */
 .leaflet-container {
   z-index: 0;
+  /* Ensure smooth touch interactions */
+  touch-action: manipulation;
 }
 
 .leaflet-control {
@@ -63,6 +78,31 @@ body {
   border-top-color: rgba(99, 102, 241, 0.3) !important;
 }
 
+/* ─── Numbered waypoint markers — touch-friendly ─── */
+.numbered-waypoint {
+  /* Remove default Leaflet icon background */
+  background: none !important;
+  border: none !important;
+  /* Larger touch target on mobile */
+  min-width: 36px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.numbered-waypoint div {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ─── Custom marker cleanup ─── */
+.custom-marker {
+  background: none !important;
+  border: none !important;
+}
+
 /* ─── Loading pulse animation ─── */
 @keyframes pulse-indigo {
   0%, 100% { opacity: 1; }
@@ -71,4 +111,37 @@ body {
 
 .animate-pulse-indigo {
   animation: pulse-indigo 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ─── Mobile-specific overrides ─── */
+@media (max-width: 640px) {
+  /* Make Leaflet zoom controls smaller on mobile */
+  .leaflet-control-zoom a {
+    width: 30px !important;
+    height: 30px !important;
+    line-height: 30px !important;
+    font-size: 16px !important;
+  }
+
+  /* Move zoom controls to right side on mobile to not overlap panel */
+  .leaflet-top.leaflet-left {
+    left: auto !important;
+    right: 10px !important;
+  }
+
+  /* Make attribution smaller on mobile */
+  .leaflet-control-attribution {
+    font-size: 8px !important;
+    max-width: 50vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* ─── Prevent text selection during drag ─── */
+.leaflet-dragging .leaflet-container {
+  cursor: grabbing !important;
+  user-select: none;
+  -webkit-user-select: none;
 }

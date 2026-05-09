@@ -1,55 +1,54 @@
-// DraggableRoute.jsx — Multi-Waypoint Drag-Based Route Shaping
-// Segment-aware dragging: drag A→B reroutes only that segment, B→C unchanged.
+// DraggableRoute.jsx — ORS-style Multi-Waypoint Routing
+// Tap/click route to add waypoint, drag to move, long-press/right-click to remove.
+// Fully touch-responsive for mobile.
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Polyline, Marker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import { extractSegmentsFromRoute } from "../utils/routeHelpers";
-import { getNearbyPOIs, fetchSegmentGeometry } from "../services/orsService";
+import { fetchSegmentGeometry } from "../services/orsService";
 import { useFirestoreDoc } from "../hooks/useFirestore";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "../services/firebase";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
-const createMarkerIcon = (color, label) =>
+const createEndpointIcon = (color, label) =>
   L.divIcon({
     className: "custom-marker",
     html: `<div style="
-      width:24px;height:24px;border-radius:50% 50% 50% 0;
-      background:${color};border:2px solid white;
-      transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.3);
+      width:28px;height:28px;border-radius:50% 50% 50% 0;
+      background:${color};border:3px solid white;
+      transform:rotate(-45deg);box-shadow:0 3px 12px rgba(0,0,0,0.4);
       display:flex;align-items:center;justify-content:center;">
-      <span style="transform:rotate(45deg);color:white;font-size:10px;font-weight:bold;">${label}</span>
+      <span style="transform:rotate(45deg);color:white;font-size:12px;font-weight:bold;">${label}</span>
     </div>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 24],
+    iconSize: [28, 28],
+    iconAnchor: [14, 28],
   });
 
-const startIcon = createMarkerIcon("#22c55e", "S");
-const endIcon   = createMarkerIcon("#ef4444", "D");
+const startIcon = createEndpointIcon("#22c55e", "S");
+const endIcon   = createEndpointIcon("#ef4444", "D");
 
-const ghostIcon = L.divIcon({
-  className: "shaping-point-ghost",
-  html: `<div style="
-    width:12px;height:12px;border-radius:50%;
-    background:rgba(99,102,241,0.8);border:2px solid #fff;
-    box-shadow:0 0 15px rgba(99,102,241,0.6);cursor:grabbing;
-  "></div>`,
-  iconSize: [12, 12],
-  iconAnchor: [6, 6],
-});
-
-const pinnedIcon = L.divIcon({
-  className: "pinned-waypoint",
-  html: `<div style="
-    width:16px;height:16px;border-radius:50%;
-    background:#f59e0b;border:2px solid #fff;
-    box-shadow:0 0 10px rgba(245,158,11,0.7);cursor:grab;
-  "></div>`,
-  iconSize: [16, 16],
-  iconAnchor: [8, 8],
-});
+// ORS-style numbered waypoint marker
+const createNumberedIcon = (num) =>
+  L.divIcon({
+    className: "numbered-waypoint",
+    html: `<div style="
+      width:28px;height:28px;border-radius:50%;
+      background:linear-gradient(135deg, #f59e0b, #d97706);
+      border:3px solid white;
+      box-shadow:0 2px 10px rgba(245,158,11,0.5);
+      display:flex;align-items:center;justify-content:center;
+      cursor:grab;font-size:12px;font-weight:bold;color:white;
+      user-select:none;
+      -webkit-user-select:none;
+      touch-action:none;">
+      ${num}
+    </div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
 
 // ─── Segment geometry cache ───────────────────────────────────────────────────
 const segmentCache = new Map();
@@ -63,9 +62,9 @@ async function fetchSegment(from, to) {
   if (segmentCache.has(key)) return segmentCache.get(key);
   const coords = await fetchSegmentGeometry(from.lat, from.lng, to.lat, to.lng);
   if (!coords) {
-    const fallback = [[from.lat, from.lng], [to.lat, to.lng]];
-    segmentCache.set(key, fallback);
-    return fallback;
+    // Don't cache failures — return straight line but allow retry next time
+    console.warn("[DraggableRoute] ORS fetch failed, straight line fallback");
+    return [[from.lat, from.lng], [to.lat, to.lng]];
   }
   segmentCache.set(key, coords);
   return coords;
@@ -73,6 +72,7 @@ async function fetchSegment(from, to) {
 
 // ─── Build full geometry from waypoints ──────────────────────────────────────
 async function buildRouteFromWaypoints(allWaypoints) {
+  // Fetch all segments in parallel
   const segmentGeoms = await Promise.all(
     allWaypoints.slice(0, -1).map((wp, i) =>
       fetchSegment(wp, allWaypoints[i + 1])
@@ -98,6 +98,7 @@ function geometryDistance(coords) {
   for (let i = 0; i < coords.length - 1; i++) d += haversineDistance(coords[i], coords[i+1]);
   return d;
 }
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function DraggableRoute({
@@ -114,52 +115,75 @@ export function DraggableRoute({
   const [pinnedWaypoints, setPinnedWaypoints] = useState([]);
   const [segmentGeoms, setSegmentGeoms] = useState([]);
   const [fullGeometry, setFullGeometry] = useState([]);
-  const [dragging, setDragging] = useState(null);
-  const [ghostPoint, setGhostPoint] = useState(null);
-  const [pois, setPois] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState(null);
 
   const lastWpStringRef = useRef("");
+  const buildAbortRef = useRef(0);
+  const longPressTimerRef = useRef(null);
 
   const { data: sessionData } = useFirestoreDoc("sessions", sessionId);
 
-  // ── Sync pinned waypoints from Firestore (Guest view) ──────────────────────
+  // ── Disable double-click zoom to prevent conflicts ─────────────────────────
   useEffect(() => {
-    if (!isHost && sessionData?.pinned_waypoints) {
-      try {
-        setPinnedWaypoints(JSON.parse(sessionData.pinned_waypoints));
-      } catch {}
+    if (map) {
+      map.doubleClickZoom.disable();
+      return () => map.doubleClickZoom.enable();
     }
-  }, [isHost, sessionData?.pinned_waypoints]);
+  }, [map]);
+
+  // ── Sync from Firestore (Guest view) ───────────────────────────────────────
+  useEffect(() => {
+    if (!isHost && sessionData) {
+      if (sessionData.pinned_waypoints) {
+        try {
+          setPinnedWaypoints(JSON.parse(sessionData.pinned_waypoints));
+        } catch {}
+      }
+      // Render pre-computed route geometry instantly for guests
+      if (sessionData.route_geometry) {
+        try {
+          const geo = JSON.parse(sessionData.route_geometry);
+          if (geo && geo.length > 2) {
+            setFullGeometry(geo);
+            setSegmentGeoms([geo]);
+          }
+        } catch {}
+      }
+    }
+  }, [isHost, sessionData?.pinned_waypoints, sessionData?.route_geometry]);
 
   // ── All waypoints: source + pins + destination ─────────────────────────────
   const allWaypoints = source && destination
     ? [{ lat: source.lat, lng: source.lng }, ...pinnedWaypoints, { lat: destination.lat, lng: destination.lng }]
     : [];
 
-  // ── Rebuild route ──────────────────────────────────────────────────────────
+  // ── Rebuild route when waypoints change ────────────────────────────────────
   useEffect(() => {
     if (!source || !destination) return;
     const wpString = JSON.stringify(allWaypoints);
     if (wpString === lastWpStringRef.current) return;
     lastWpStringRef.current = wpString;
 
+    const buildId = ++buildAbortRef.current;
     setIsLoading(true);
     setFetchError(null);
 
     buildRouteFromWaypoints(allWaypoints)
       .then(({ segments, fullGeometry: fg }) => {
+        if (buildId !== buildAbortRef.current) return;
         setSegmentGeoms(segments);
         setFullGeometry(fg);
         const totalKm = geometryDistance(fg);
+        const totalTime = Math.round((totalKm / 30) * 60);
         onRouteReady?.({
           totalDistance: totalKm.toFixed(1),
-          totalTime: Math.round((totalKm / 30) * 60),
+          totalTime,
         });
         onRouteUpdated?.(allWaypoints);
         onSegmentDragged?.(extractSegmentsFromRoute(fg, 10));
-        if (fg.length > 0) map.fitBounds(fg, { padding: [50, 50], animate: true });
+        if (fg.length > 0) map.fitBounds(fg, { padding: [50, 50], animate: true, maxZoom: 16 });
+        // Sync to Firestore for live guest updates
         if (isHost && sessionId) {
           updateDoc(doc(db, "sessions", sessionId), {
             route_geometry: JSON.stringify(fg),
@@ -168,84 +192,114 @@ export function DraggableRoute({
         }
       })
       .catch((err) => {
+        if (buildId !== buildAbortRef.current) return;
         console.error("[DraggableRoute] Route build failed:", err);
-        setFetchError("Route calculation failed. Try a different path.");
+        setFetchError("Route calculation failed. Try again.");
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        if (buildId === buildAbortRef.current) setIsLoading(false);
+      });
   }, [source, destination, pinnedWaypoints]);
 
-  // ── Drag handlers ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (dragging === null || !isHost) return;
+  // ── Click/tap on polyline to add waypoint ──────────────────────────────────
+  const handlePolylineClick = useCallback((e, segIdx) => {
+    if (!isHost) return;
+    L.DomEvent.stopPropagation(e);
+    const newPin = { lat: e.latlng.lat, lng: e.latlng.lng };
+    setPinnedWaypoints((prev) => {
+      const updated = [...prev];
+      updated.splice(segIdx, 0, newPin);
+      return updated;
+    });
+  }, [isHost]);
 
-    const onMouseMove = (e) => setGhostPoint(e.latlng);
+  // ── Drag waypoint to new position ──────────────────────────────────────────
+  const handleWaypointDragEnd = useCallback((e, idx) => {
+    map.dragging.enable();
+    const pos = e.target.getLatLng();
+    setPinnedWaypoints((prev) => {
+      const updated = [...prev];
+      updated[idx] = { lat: pos.lat, lng: pos.lng };
+      return updated;
+    });
+  }, [map]);
 
-    const onMouseUp = (e) => {
-      const newPin = { lat: e.latlng.lat, lng: e.latlng.lng };
-      const segIdx = dragging.segmentIndex;
-      setDragging(null);
-      setGhostPoint(null);
-      map.dragging.enable();
-      setPinnedWaypoints((prev) => {
-        const updated = [...prev];
-        updated.splice(segIdx, 0, newPin);
-        return updated;
-      });
-    };
+  // ── Remove waypoint ───────────────────────────────────────────────────────
+  const handleWaypointRemove = useCallback((idx) => {
+    setPinnedWaypoints((prev) => prev.filter((_, j) => j !== idx));
+  }, []);
 
-    map.on("mousemove", onMouseMove);
-    map.on("mouseup", onMouseUp);
-    return () => {
-      map.off("mousemove", onMouseMove);
-      map.off("mouseup", onMouseUp);
-    };
-  }, [dragging, isHost, map]);
+  // ── Long press detection for mobile (remove waypoint) ──────────────────────
+  const startLongPress = useCallback((idx) => {
+    longPressTimerRef.current = setTimeout(() => {
+      if (window.confirm(`Remove waypoint ${idx + 1}?`)) {
+        handleWaypointRemove(idx);
+      }
+    }, 600);
+  }, [handleWaypointRemove]);
 
-  // ── POIs around last pin ───────────────────────────────────────────────────
-  useEffect(() => {
-    const lastPin = pinnedWaypoints[pinnedWaypoints.length - 1];
-    if (!lastPin) return;
-    getNearbyPOIs(lastPin.lat, lastPin.lng)
-      .then((d) => setPois(d.features || []))
-      .catch(() => {});
-  }, [pinnedWaypoints]);
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
 
   if (!source || !destination) return null;
 
-  const segColors = ["#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b"];
+  const segColors = ["#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ec4899"];
 
   return (
     <>
       {fetchError && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[1000] bg-red-900/80 backdrop-blur text-white px-4 py-2 rounded-lg border border-red-500 text-xs shadow-xl">
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-red-900/90 backdrop-blur text-white px-4 py-2 rounded-lg border border-red-500/50 text-xs shadow-xl max-w-[90%]">
           {fetchError}
         </div>
       )}
 
+      {isLoading && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-gray-900/90 backdrop-blur text-indigo-300 px-4 py-2 rounded-lg border border-indigo-500/30 text-xs shadow-xl flex items-center gap-2">
+          <span className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+          Calculating route...
+        </div>
+      )}
+
+      {/* Route outline shadow for visibility */}
+      {fullGeometry.length > 0 && (
+        <Polyline
+          positions={fullGeometry}
+          pathOptions={{ color: "#1e1b4b", weight: 10, opacity: 0.4, lineJoin: "round", lineCap: "round" }}
+        />
+      )}
+
+      {/* Colored segment polylines */}
       {segmentGeoms.map((segCoords, i) => {
         const color = segColors[i % segColors.length];
-        const isDraggingThis = dragging?.segmentIndex === i;
         return (
           <Polyline
             key={`seg-${i}-${segCoords.length}`}
             positions={segCoords}
-            pathOptions={{ color, weight: 6, opacity: isDraggingThis ? 0.25 : 0.85, lineJoin: "round" }}
+            pathOptions={{
+              color,
+              weight: 6,
+              opacity: 0.9,
+              lineJoin: "round",
+              lineCap: "round",
+            }}
             eventHandlers={{
-              mousedown: (e) => {
-                if (!isHost) return;
-                L.DomEvent.stopPropagation(e);
-                setDragging({ segmentIndex: i });
-                setGhostPoint(e.latlng);
-                map.dragging.disable();
+              click: (e) => handlePolylineClick(e, i),
+              mouseover: (e) => {
+                if (isHost) e.target.setStyle({ weight: 10, opacity: 1 });
               },
-              mouseover: (e) => { if (isHost) e.target.setStyle({ color, weight: 9, opacity: 1 }); },
-              mouseout:  (e) => { if (isHost) e.target.setStyle({ color, weight: 6, opacity: 0.85 }); },
+              mouseout: (e) => {
+                if (isHost) e.target.setStyle({ weight: 6, opacity: 0.9 });
+              },
             }}
           >
             {isHost && (
-              <Tooltip sticky direction="top" opacity={0.9}>
-                <span className="text-[10px] font-bold" style={{ color }}>
-                  Drag to reshape segment {i + 1}
+              <Tooltip sticky direction="top" opacity={0.95}>
+                <span style={{ fontSize: "10px", fontWeight: "bold", color }}>
+                  Tap to add waypoint
                 </span>
               </Tooltip>
             )}
@@ -253,66 +307,54 @@ export function DraggableRoute({
         );
       })}
 
-      {dragging !== null && ghostPoint && (() => {
-        const fromWp = allWaypoints[dragging.segmentIndex];
-        const toWp   = allWaypoints[dragging.segmentIndex + 1];
-        if (!fromWp || !toWp) return null;
-        return (
-          <>
-            <Polyline
-              positions={[[fromWp.lat, fromWp.lng], [ghostPoint.lat, ghostPoint.lng], [toWp.lat, toWp.lng]]}
-              pathOptions={{ color: "#818cf8", weight: 3, dashArray: "10, 10", opacity: 0.7 }}
-            />
-            <Marker position={ghostPoint} icon={ghostIcon} />
-          </>
-        );
-      })()}
-
+      {/* ORS-style numbered waypoint markers — Host (draggable) */}
       {isHost && pinnedWaypoints.map((wp, i) => (
         <Marker
-          key={`pin-${i}`}
+          key={`pin-${i}-${wp.lat}-${wp.lng}`}
           position={[wp.lat, wp.lng]}
-          icon={pinnedIcon}
+          icon={createNumberedIcon(i + 1)}
           draggable={true}
           eventHandlers={{
-            dragend: (e) => {
-              const pos = e.target.getLatLng();
-              setPinnedWaypoints((prev) => {
-                const updated = [...prev];
-                updated[i] = { lat: pos.lat, lng: pos.lng };
-                return updated;
-              });
+            dragstart: () => {
+              cancelLongPress();
+              map.dragging.disable();
             },
-            dblclick: () => {
-              setPinnedWaypoints((prev) => prev.filter((_, j) => j !== i));
+            dragend: (e) => handleWaypointDragEnd(e, i),
+            contextmenu: (e) => {
+              L.DomEvent.preventDefault(e);
+              L.DomEvent.stopPropagation(e);
+              handleWaypointRemove(i);
             },
+            // Mobile long-press to remove
+            mousedown: () => startLongPress(i),
+            mouseup: cancelLongPress,
+            mouseleave: cancelLongPress,
           }}
         >
-          <Tooltip direction="top">
-            <span className="text-[10px] font-bold text-amber-400">
-              Waypoint {i + 1} — drag to move · double-click to remove
+          <Tooltip direction="top" offset={[0, -16]}>
+            <span style={{ fontSize: "10px", fontWeight: "bold", color: "#d97706" }}>
+              Waypoint {i + 1} · drag to move · right-click to remove
             </span>
           </Tooltip>
         </Marker>
       ))}
 
-      {pois.map((poi, i) => (
+      {/* Guest view: show numbered markers (read-only) */}
+      {!isHost && pinnedWaypoints.map((wp, i) => (
         <Marker
-          key={`poi-${i}`}
-          position={[poi.geometry.coordinates[1], poi.geometry.coordinates[0]]}
-          icon={L.divIcon({
-            className: "",
-            html: `<div style="background:#eab308;width:8px;height:8px;border-radius:50%;border:2px solid white;box-shadow:0 0 10px rgba(234,179,8,0.6);"></div>`,
-          })}
+          key={`guest-pin-${i}`}
+          position={[wp.lat, wp.lng]}
+          icon={createNumberedIcon(i + 1)}
         >
-          <Tooltip direction="top" offset={[0, -5]}>
-            <span className="text-[10px] font-bold text-gray-200">
-              Amenity: {poi.properties.label || "Service"}
+          <Tooltip direction="top" offset={[0, -16]}>
+            <span style={{ fontSize: "10px", fontWeight: "bold", color: "#d97706" }}>
+              Waypoint {i + 1}
             </span>
           </Tooltip>
         </Marker>
       ))}
 
+      {/* Start and End markers */}
       <Marker position={[source.lat, source.lng]} icon={startIcon} />
       <Marker position={[destination.lat, destination.lng]} icon={endIcon} />
     </>
