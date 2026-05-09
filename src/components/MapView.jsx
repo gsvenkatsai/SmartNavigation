@@ -297,8 +297,8 @@ export function MapView({ sessionId, isHost = true, initialSource = null }) {
       {/* Floating Control Panel — collapsible on mobile */}
       <div className={`absolute top-2 left-2 sm:top-4 sm:left-4 bg-gray-900/90 backdrop-blur-md rounded-2xl shadow-xl border border-gray-700 z-[1000] transition-all duration-300 ${panelOpen ? 'w-[85vw] sm:w-72 max-h-[75vh] overflow-y-auto' : 'w-auto'}`}>
         {/* Panel header — always visible, acts as toggle on mobile */}
-        <button 
-          className="w-full flex items-center justify-between p-3 sm:p-4"
+        <div 
+          className="w-full flex items-center justify-between p-3 sm:p-4 cursor-pointer"
           onClick={() => setPanelOpen(!panelOpen)}
         >
           <h3 className="text-white font-bold text-sm flex items-center gap-2">
@@ -317,7 +317,7 @@ export function MapView({ sessionId, isHost = true, initialSource = null }) {
               {panelOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </span>
           </div>
-        </button>
+        </div>
 
         {/* Panel body */}
         {panelOpen && (
