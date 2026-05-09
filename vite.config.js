@@ -23,11 +23,11 @@ export default defineConfig({
           "Accept": "application/json, application/geo+json, */*",
         },
       },
-      // Gemini API proxy — fixes CORS for AI agent calls
-      "/gemini-api": {
-        target: "https://generativelanguage.googleapis.com",
+      // Groq API proxy — fixes CORS for AI agent calls
+      "/groq-api": {
+        target: "https://api.groq.com",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/gemini-api/, ""),
+        rewrite: (path) => path.replace(/^\/groq-api/, ""),
         secure: true,
       },
     },

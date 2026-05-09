@@ -59,6 +59,7 @@ export default function App() {
             <Route path="/host/:sessionId" element={<HostView />} />
             <Route path="/join/:sessionId" element={<GuestView />} />
             <Route path="/dashboard" element={<AIDashboard />} />
+            <Route path="/dashboard/:sessionId" element={<AIDashboard />} />
             {/* Legacy MapView path for standalone testing if needed */}
             <Route path="/map" element={<MapView />} />
           </Routes>

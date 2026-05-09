@@ -2,7 +2,7 @@
 // Tap/click route to add waypoint, drag to move, long-press/right-click to remove.
 // Fully touch-responsive for mobile.
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Polyline, Marker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import { extractSegmentsFromRoute } from "../utils/routeHelpers";
@@ -124,11 +124,34 @@ export function DraggableRoute({
 
   const { data: sessionData } = useFirestoreDoc("sessions", sessionId);
 
+  const [prevSessionData, setPrevSessionData] = useState(null);
+  if (!isHost && sessionData && sessionData !== prevSessionData) {
+    setPrevSessionData(sessionData);
+    if (sessionData.pinned_waypoints) {
+      try {
+        setPinnedWaypoints(JSON.parse(sessionData.pinned_waypoints));
+      } catch (e) {
+        console.warn("[DraggableRoute] Failed to parse pinned waypoints", e);
+      }
+    }
+    // Render pre-computed route geometry instantly for guests
+    if (sessionData.route_geometry) {
+      try {
+        const geo = JSON.parse(sessionData.route_geometry);
+        if (geo && geo.length > 2) {
+          setFullGeometry(geo);
+          setSegmentGeoms([geo]);
+        }
+      } catch (e) {
+        console.warn("[DraggableRoute] Failed to parse route geometry", e);
+      }
+    }
+  }
+
   useEffect(() => {
     segmentCache.clear();
   }, []);
 
-  // ── Sync pinned waypoints from Firestore (Guest view) ──────────────────────
   // ── Disable double-click zoom to prevent conflicts ─────────────────────────
   useEffect(() => {
     if (map) {
@@ -137,31 +160,12 @@ export function DraggableRoute({
     }
   }, [map]);
 
-  // ── Sync from Firestore (Guest view) ───────────────────────────────────────
-  useEffect(() => {
-    if (!isHost && sessionData) {
-      if (sessionData.pinned_waypoints) {
-        try {
-          setPinnedWaypoints(JSON.parse(sessionData.pinned_waypoints));
-        } catch {}
-      }
-      // Render pre-computed route geometry instantly for guests
-      if (sessionData.route_geometry) {
-        try {
-          const geo = JSON.parse(sessionData.route_geometry);
-          if (geo && geo.length > 2) {
-            setFullGeometry(geo);
-            setSegmentGeoms([geo]);
-          }
-        } catch {}
-      }
-    }
-  }, [isHost, sessionData?.pinned_waypoints, sessionData?.route_geometry]);
-
   // ── All waypoints: source + pins + destination ─────────────────────────────
-  const allWaypoints = source && destination
-    ? [{ lat: source.lat, lng: source.lng }, ...pinnedWaypoints, { lat: destination.lat, lng: destination.lng }]
-    : [];
+  const allWaypoints = useMemo(() => {
+    return source && destination
+      ? [{ lat: source.lat, lng: source.lng }, ...pinnedWaypoints, { lat: destination.lat, lng: destination.lng }]
+      : [];
+  }, [source, destination, pinnedWaypoints]);
 
   // ── Rebuild route when waypoints change ────────────────────────────────────
   useEffect(() => {
@@ -204,7 +208,7 @@ export function DraggableRoute({
       .finally(() => {
         if (buildId === buildAbortRef.current) setIsLoading(false);
       });
-  }, [source, destination, pinnedWaypoints]);
+  }, [source, destination, pinnedWaypoints, allWaypoints, isHost, map, onRouteReady, onRouteUpdated, onSegmentDragged, sessionId]);
 
   // ── Click/tap on polyline to add waypoint ──────────────────────────────────
   const handlePolylineClick = useCallback((e, segIdx) => {

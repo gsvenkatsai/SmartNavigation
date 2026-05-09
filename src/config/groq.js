@@ -1,3 +1,3 @@
 // AI model identifier — used by all agents via safeGenerate()
-// Using gemini-1.5-flash-latest for generous free tier quota
-export const model = "gemini-1.5-flash-latest";
+// Using llama-3.3-70b-versatile for high performance
+export const model = "llama-3.3-70b-versatile";

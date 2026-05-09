@@ -1,10 +1,10 @@
 /**
- * aiUtils.js — Safe LLM wrapper using Gemini REST API
- * All calls go through Vite dev proxy at /gemini-api to avoid CORS.
+ * aiUtils.js — Safe LLM wrapper using Groq REST API
+ * All calls go through Vite dev proxy at /groq-api to avoid CORS.
  * Includes circuit breaker for 429 quota exhaustion.
  */
 
-const GEMINI_PROXY = "/gemini-api";
+const GROQ_PROXY = "/groq-api";
 
 // ─── Circuit breaker state ──────────────────────────────────────────────────
 let quotaExhausted = false;
@@ -31,32 +31,33 @@ export async function safeGenerate(model, prompt, retries = 2) {
     return { ...FALLBACK_RESULT };
   }
 
-  const apiKey = import.meta.env.VITE_GEMINI_KEY;
+  const apiKey = import.meta.env.VITE_GROQ_API_KEY;
   if (!apiKey) {
-    console.error("[safeGenerate] VITE_GEMINI_KEY is not set!");
+    console.error("[safeGenerate] VITE_GROQ_API_KEY is not set!");
     return { ...FALLBACK_RESULT };
   }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const url = `${GEMINI_PROXY}/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+      const url = `${GROQ_PROXY}/openai/v1/chat/completions`;
 
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          contents: [
+          model: model,
+          messages: [
             {
-              parts: [{ text: prompt }],
+              role: "user",
+              content: prompt,
             },
           ],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 1000,
-            responseMimeType: "application/json",
-          },
+          temperature: 0.7,
+          max_tokens: 1000,
+          response_format: { type: "json_object" },
         }),
       });
 
@@ -75,17 +76,17 @@ export async function safeGenerate(model, prompt, retries = 2) {
           return { ...FALLBACK_RESULT };
         }
 
-        throw new Error(`Gemini API Error ${response.status}: ${errText}`);
+        throw new Error(`Groq API Error ${response.status}: ${errText}`);
       }
 
       const data = await response.json();
-      let raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      let raw = data.choices?.[0]?.message?.content?.trim();
 
       if (!raw) {
-        throw new Error("Empty response from Gemini");
+        throw new Error("Empty response from Groq");
       }
 
-      // Strip markdown code fences LLMs sometimes add
+      // Strip markdown code fences LLMs sometimes add (though response_format should help)
       raw = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "");
       raw = raw.replace(/\s*```$/i, "").trim();
 

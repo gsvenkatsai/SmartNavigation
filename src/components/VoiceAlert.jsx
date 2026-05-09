@@ -1,7 +1,7 @@
 // VoiceAlert.jsx — Browser SpeechSynthesis wrapper for route warnings
 // Real-time integration with Firestore sessions collection
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useFirestoreDoc } from "../hooks/useFirestore";
 
 // Hardcoded Day 0 fallback warning
@@ -16,7 +16,7 @@ export function VoiceAlert({ sessionId = "session-host-guest-101", autoSpeak = f
   const isAICooldown = text.includes("AI analysis on cooldown") || text.includes("AI analysis temporarily");
   const lastWarningRef = useRef("");
 
-  const speak = (overrideText) => {
+  const speak = useCallback((overrideText) => {
     const speakText = overrideText || text;
     // Don't speak cooldown/fallback messages
     if (speakText.includes("AI analysis on cooldown") || speakText.includes("AI analysis temporarily")) return;
@@ -29,7 +29,7 @@ export function VoiceAlert({ sessionId = "session-host-guest-101", autoSpeak = f
     utterance.onend = () => setSpeaking(false);
     utterance.onerror = () => setSpeaking(false);
     window.speechSynthesis.speak(utterance);
-  };
+  }, [text]);
 
   const stop = () => {
     window.speechSynthesis.cancel();
@@ -44,7 +44,7 @@ export function VoiceAlert({ sessionId = "session-host-guest-101", autoSpeak = f
         speak(sessionData.ai_warning);
       }
     }
-  }, [sessionData?.ai_warning, autoSpeak]);
+  }, [sessionData?.ai_warning, autoSpeak, speak]);
 
   // Cleanup
   useEffect(() => {

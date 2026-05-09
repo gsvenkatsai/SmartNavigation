@@ -3,7 +3,7 @@ import { Navigation, Database, Bot, MapPin, Loader2, Copy, Check, Share2, X } fr
 import { useState } from 'react';
 import { seedDemoData } from '../utils/seeder';
 import { doc, setDoc } from 'firebase/firestore';
-import { db, sessionsCollection } from '../services/firebase';
+import { sessionsCollection } from '../services/firebase';
 
 export default function Home() {
   const [isSeeding, setIsSeeding] = useState(false);

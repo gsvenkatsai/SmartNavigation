@@ -1,6 +1,6 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { MapContainer, TileLayer, Marker, useMapEvents, Polyline } from "react-leaflet";
-import { Activity, Navigation, ChevronDown, ChevronUp } from "lucide-react";
+import { Activity, Navigation, ChevronDown, ChevronUp, AlertTriangle, X } from "lucide-react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -30,7 +30,6 @@ const createMarkerIcon = (color, label) =>
   });
 
 const startIcon = createMarkerIcon("#22c55e", "A");
-const endIcon   = createMarkerIcon("#ef4444", "B");
 
 function MapClickHandler({ onMapClick, disabled }) {
   useMapEvents({ 
@@ -105,6 +104,14 @@ function PlaceSearch({ id, label, icon, value, onChange, onSelect, suggestions, 
 export function MapView({ sessionId, isHost = true, initialSource = null }) {
   const isSharedSession = !!initialSource;
   const [source, setSource]           = useState(initialSource || BANGALORE);
+  const [prevInitialSource, setPrevInitialSource] = useState(initialSource);
+
+  if (initialSource !== prevInitialSource) {
+    setPrevInitialSource(initialSource);
+    setSource(initialSource);
+    setSrcQuery("Shared Location");
+  }
+
   const [destination, setDestination] = useState(null);
   const [isRouteReady, setIsRouteReady] = useState(false);
   const [routeSummary, setRouteSummary] = useState(null);
@@ -123,22 +130,23 @@ export function MapView({ sessionId, isHost = true, initialSource = null }) {
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [isochrone, setIsochrone]     = useState(null);
   const [efficiency, setEfficiency]   = useState(null);
+  const [showDelayPopup, setShowDelayPopup] = useState(true);
   const processedSegments = useRef(new Set());
-
-  // Update source if initialSource changes
-  useEffect(() => {
-    if (initialSource) {
-      setSource(initialSource);
-      setSrcQuery("Shared Location");
-    }
-  }, [initialSource]);
 
   // Firestore sync for Guest
   const { data: sessionData } = useFirestoreDoc("sessions", sessionId);
 
-  useEffect(() => {
-    if (!isHost && sessionData?.live_waypoints?.length >= 1) {
-      const wps = sessionData.live_waypoints;
+  const [prevDelayFlag, setPrevDelayFlag] = useState(false);
+  if (sessionData?.delay_flag && !prevDelayFlag) {
+    setPrevDelayFlag(true);
+    setShowDelayPopup(true);
+  }
+
+  const [prevWaypoints, setPrevWaypoints] = useState(null);
+  if (!isHost && sessionData?.live_waypoints && JSON.stringify(sessionData.live_waypoints) !== JSON.stringify(prevWaypoints)) {
+    setPrevWaypoints(sessionData.live_waypoints);
+    const wps = sessionData.live_waypoints;
+    if (wps.length >= 1) {
       setSource(wps[0]);
       setSrcQuery("Host Start");
       if (wps.length > 1) {
@@ -146,7 +154,7 @@ export function MapView({ sessionId, isHost = true, initialSource = null }) {
         setDstQuery("Host Destination");
       }
     }
-  }, [isHost, sessionData?.live_waypoints]);
+  }
 
   // Debounced search
   const handleSrcChange = (val) => {
@@ -508,6 +516,34 @@ export function MapView({ sessionId, isHost = true, initialSource = null }) {
       </div>
 
       <VoiceAlert sessionId={sessionId || "session-host-guest-101"} autoSpeak={true} />
+
+      {/* PROACTIVE DELAY POPUP (MODAL) */}
+      {sessionData && sessionData.delay_flag && showDelayPopup && source && destination && (
+        <div className="fixed inset-0 z-[5000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-gray-900 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden border border-red-500/30 animate-in zoom-in-95 duration-300">
+            <div className="bg-red-600 p-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2 font-black uppercase tracking-tighter text-sm">
+                <AlertTriangle size={18} />
+                <span>Delay Detected</span>
+              </div>
+              <button onClick={() => setShowDelayPopup(false)} className="text-white/80 hover:text-white transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-8 text-center">
+              <p className="text-gray-100 text-sm font-medium mb-8 leading-relaxed italic">"{sessionData.delay_message}"</p>
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(sessionData.delay_message)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-4 rounded-2xl transition shadow-lg shadow-green-500/20 active:scale-95"
+              >
+                <span>Notify via WhatsApp</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

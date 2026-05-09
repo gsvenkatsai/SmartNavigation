@@ -117,7 +117,7 @@ SmartNav is built on **4 integrated layers**:
                                      │  Layer 4         │
                                      │  External APIs   │
                                      │                  │
-                                     │  Google Gemini   │
+                                     │  Groq API   │
                                      │  OpenWeather     │
                                      │  OpenRouteService│
                                      └──────────────────┘
@@ -173,7 +173,7 @@ User submits report (free text)
 | **Routing (App)** | React Router DOM 7 |
 | **Mapping** | Leaflet 1.9 + React-Leaflet 5 |
 | **Routing API** | OpenRouteService (Directions, Isochrones, Matrix, Geocoding) |
-| **AI / LLM** | Google Gemini API (`@google/generative-ai`) |
+| **AI / LLM** | Groq API |
 | **Database** | Firebase Firestore (real-time `onSnapshot`) |
 | **Auth** | Firebase Auth |
 | **Weather** | OpenWeather API |
@@ -210,7 +210,7 @@ SmartNavigation/
 │   │   ├── AIDashboard.jsx        # Report modal + validation log
 │   │   └── RoutingEngine.jsx      # ORS route orchestration
 │   ├── config/
-│   │   └── groq.js                # Gemini model config
+│   │   └── groq.js                # Groq model config
 │   ├── hooks/
 │   │   └── useFirestore.js        # Firestore helpers & custom hooks
 │   ├── services/
@@ -294,8 +294,8 @@ Stores raw community reports and their AI-processed metadata.
 Create a `.env` file in the project root:
 
 ```env
-# Google Gemini AI
-VITE_GEMINI_KEY=your_gemini_api_key
+# Groq API AI
+VITE_GROQ_API_KEY=your_groq_api_key
 
 # OpenWeather
 VITE_OPENWEATHER_KEY=your_openweather_api_key
@@ -320,7 +320,7 @@ VITE_FIREBASE_APP_ID=your_app_id
 
 - Node.js ≥ 18
 - A Firebase project with Firestore enabled
-- API keys for Gemini, OpenRouteService, and OpenWeather
+- API keys for Groq, OpenRouteService, and OpenWeather
 
 ### Local Installation
 

@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useFirestoreDoc } from '../hooks/useFirestore';
-import { Loader2, ArrowLeft, Navigation2, AlertTriangle, Activity } from 'lucide-react';
+import { Loader2, ArrowLeft, AlertTriangle, Activity } from 'lucide-react';
 import { MapView } from './MapView';
 
 export default function GuestView() {
@@ -70,7 +69,7 @@ export default function GuestView() {
               <span className="text-red-400 text-[10px] font-bold uppercase tracking-tighter hidden sm:inline">Delay Alert</span>
             </div>
           )}
-          <Link to="/dashboard" className="p-2 bg-indigo-500/10 hover:bg-indigo-500/20 active:bg-indigo-500/30 border border-indigo-500/20 rounded-full text-indigo-400 transition-colors">
+          <Link to={`/dashboard/${sessionId}`} className="p-2 bg-indigo-500/10 hover:bg-indigo-500/20 active:bg-indigo-500/30 border border-indigo-500/20 rounded-full text-indigo-400 transition-colors">
             <Activity size={18} />
           </Link>
         </div>

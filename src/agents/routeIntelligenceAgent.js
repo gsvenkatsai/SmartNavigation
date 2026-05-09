@@ -84,6 +84,8 @@ export async function runRouteIntelligence(sessionDocId, isReroute = false) {
       await updateDoc(doc(db, "sessions", sessionDocId), {
         ai_warning: cachedResult || "⚡ Community data active — AI analysis on cooldown",
       });
-    } catch {}
+    } catch (updateErr) {
+      console.error("[RouteIntel] Fallback update failed:", updateErr);
+    }
   }
 }

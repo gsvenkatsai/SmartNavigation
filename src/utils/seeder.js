@@ -1,5 +1,5 @@
 import { doc, setDoc } from 'firebase/firestore';
-import { db, segmentsCollection, sessionsCollection, reportsCollection } from '../services/firebase';
+import { segmentsCollection, sessionsCollection, reportsCollection } from '../services/firebase';
 
 /**
  * Seeds Firestore with dummy data for Day 0 testing.

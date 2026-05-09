@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { db, reportsCollection } from '../services/firebase';
 import { doc, onSnapshot, addDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
-import { ArrowLeft, AlertTriangle, MessageSquare, CheckCircle, Clock, ShieldAlert, Send, Info, X, Bot, Zap } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, MessageSquare, CheckCircle, Clock, ShieldAlert, Send, X, Bot, Zap } from 'lucide-react';
 import { runWhyAvoidAgent } from '../agents';
 
 export default function AIDashboard() {
+  const { sessionId: paramSessionId } = useParams();
+  const sessionId = paramSessionId || 'session-host-guest-101';
+
   const [reports, setReports] = useState([]);
   const [sessionData, setSessionData] = useState(null);
   
@@ -25,8 +28,8 @@ export default function AIDashboard() {
       setReports(data);
     }, (err) => console.error("Reports listener error:", err));
 
-    // 2. Session Context Listener (Default Demo Session)
-    const sessionRef = doc(db, 'sessions', 'session-host-guest-101');
+    // 2. Session Context Listener
+    const sessionRef = doc(db, 'sessions', sessionId);
     const unsubSession = onSnapshot(sessionRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
@@ -41,7 +44,7 @@ export default function AIDashboard() {
       unsubReports();
       unsubSession();
     };
-  }, []);
+  }, [sessionId]);
 
   const handleReportSubmit = async (e) => {
     e.preventDefault();
@@ -72,7 +75,7 @@ export default function AIDashboard() {
   return (
     <div className="flex flex-col min-h-screen relative bg-gray-950 text-gray-100 pb-20 overflow-x-hidden">
       <header className="p-6 pb-2 flex items-center justify-between border-b border-gray-800 bg-gray-900/50 backdrop-blur-md sticky top-0 z-20">
-        <Link to="/" className="p-2 hover:bg-gray-800 rounded-full transition-colors text-gray-400">
+        <Link to={paramSessionId ? `/join/${paramSessionId}` : "/"} className="p-2 hover:bg-gray-800 rounded-full transition-colors text-gray-400">
           <ArrowLeft size={20} />
         </Link>
         <div className="flex flex-col items-center">
@@ -108,7 +111,7 @@ export default function AIDashboard() {
               <button 
                 onClick={async () => {
                   if (!showWhyAvoid) {
-                    await runWhyAvoidAgent('sony-signal-02', 'session-host-guest-101');
+                    await runWhyAvoidAgent('sony-signal-02', sessionId);
                   }
                   setShowWhyAvoid(!showWhyAvoid);
                 }}

@@ -49,30 +49,25 @@ function getCoordsFromId(segmentId) {
 }
 
 /**
- * Fetch road-following geometry from ORS via Vite proxy.
- * Uses GET endpoint with start/end query params.
+ * Fetch road-following geometry from OSRM directly.
+ * Returns array of [lat, lng] pairs for Leaflet.
  */
 async function fetchSegmentRoadGeometry(startLat, startLng, endLat, endLng) {
-  const ORS_KEY = import.meta.env.VITE_ORS_API_KEY;
-  const url = `/ors-api/v2/directions/driving-car?api_key=${ORS_KEY}&start=${startLng},${startLat}&end=${endLng},${endLat}`;
+  const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
 
-  const res = await fetch(url, {
-    headers: {
-      'Accept': 'application/json, application/geo+json',
-    },
-  });
+  const res = await fetch(url);
 
   if (!res.ok) {
-    throw new Error(`ORS heatmap fetch failed: ${res.status}`);
+    throw new Error(`OSRM heatmap fetch failed: ${res.status}`);
   }
 
   const data = await res.json();
-  const coords = data.features?.[0]?.geometry?.coordinates;
+  const coords = data.routes?.[0]?.geometry?.coordinates;
   if (!coords || coords.length === 0) {
-    throw new Error("No coordinates in ORS response");
+    throw new Error("No coordinates in OSRM response");
   }
 
-  // Convert [lng, lat] → [lat, lng] for Leaflet
+  // OSRM returns [lng, lat] → Convert to [lat, lng] for Leaflet
   return coords.map(([lng, lat]) => [lat, lng]);
 }
 
@@ -152,7 +147,10 @@ export function SegmentHeatmap() {
         const avoidCount = seg.avoid_count || 0;
         const score = preferCount - avoidCount;
         const color = getSegmentColor(preferCount, avoidCount);
-        const isHighConfidence = preferCount > 20;
+        
+        // Pulse if recently updated (last 5 minutes)
+        const lastUpdated = seg.last_updated?.toDate ? seg.last_updated.toDate() : new Date(seg.last_updated);
+        const isRecent = (new Date() - lastUpdated) < 5 * 60 * 1000;
 
         return (
           <Polyline
@@ -165,7 +163,7 @@ export function SegmentHeatmap() {
               lineCap: "round",
               lineJoin: "round",
               dashArray: score > 10 ? "1, 5" : null,
-              className: isHighConfidence ? "animate-pulse-segment" : undefined,
+              className: isRecent ? "animate-pulse-segment" : undefined,
             }}
           >
             <Tooltip sticky>

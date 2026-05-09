@@ -116,7 +116,7 @@ export async function optimizeRoute(jobs, vehicles) {
 /**
  * 5. POIs — Find nearby places
  */
-export async function getNearbyPOIs(lat, lng, category = "fuel") {
+export async function getNearbyPOIs(lat, lng) {
   return withRetry(async () => {
     const url = `${ORS_BASE}/pois`;
     const res = await fetch(url, {
