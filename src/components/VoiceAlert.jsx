@@ -49,7 +49,7 @@ export function VoiceAlert({ sessionId = "session-host-guest-101", autoSpeak = f
 
   return (
     <div
-      className="absolute bottom-6 left-4 z-[1000] w-72"
+      className="absolute bottom-6 right-4 z-[1000] w-72"
       style={{ zIndex: 1000 }}
     >
       <div className="bg-gray-900/90 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-amber-500/30">

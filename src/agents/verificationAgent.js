@@ -1,5 +1,5 @@
 import { db } from "../services/firebase";
-import { model } from "../config/gemini";
+import { model } from "../config/groq";
 import { safeGenerate } from "../utils/aiUtils";
 import { collection, query, where, getDocs,
          updateDoc, doc, Timestamp } from "firebase/firestore";
@@ -46,11 +46,13 @@ export async function runVerificationAgent(reportDocId, segmentId, parsedReport)
       buildPrompt(parsedReport, weather, recentCount)
     );
 
-    const status = result.verified
+    const status = recentCount >= 3
       ? "verified"
-      : result.confidence === "low"
-        ? "suspicious"
-        : "low_confidence";
+      : result.verified
+        ? "verified"
+        : result.confidence === "low"
+          ? "suspicious"
+          : "low_confidence";
 
     await updateDoc(doc(db, "reports", reportDocId), {
       verification_status: status,

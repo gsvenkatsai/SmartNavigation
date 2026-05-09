@@ -10,8 +10,8 @@ export const seedDemoData = async () => {
     // 1. Seed segments
     // Contract: { segment_id, prefer_count, avoid_count, confidence, last_updated }
     const segmentDomlur = {
-      segment_id: 'domlur-01',
-      prefer_count: 3,
+      segment_id: 'domlur-01', start_lat: 12.9791, start_lng: 77.5913, end_lat: 12.9850, end_lng: 77.5950,
+      prefer_count: 15,
       avoid_count: 14,
       confidence: 0.85,
       last_updated: new Date()
@@ -19,7 +19,7 @@ export const seedDemoData = async () => {
     await setDoc(doc(segmentsCollection, 'domlur-01'), segmentDomlur);
 
     const segmentSonySignal = {
-      segment_id: 'sony-signal-02',
+      segment_id: 'sony-signal-02', start_lat: 12.9698, start_lng: 77.6101, end_lat: 12.9720, end_lng: 77.6130,
       prefer_count: 0,
       avoid_count: 20,
       confidence: 0.95,
@@ -46,7 +46,7 @@ export const seedDemoData = async () => {
     // 3. Seed reports
     // Contract: { segment_id, report_text, ai_category, ai_severity, verification_status, created_at }
     const report1 = {
-      segment_id: 'sony-signal-02',
+      segment_id: 'sony-signal-02', start_lat: 12.9698, start_lng: 77.6101, end_lat: 12.9720, end_lng: 77.6130,
       report_text: 'Water logging up to knee level',
       ai_category: 'flooding',
       ai_severity: 'high',
@@ -56,7 +56,7 @@ export const seedDemoData = async () => {
     await setDoc(doc(reportsCollection, 'report-001'), report1);
 
     const report2 = {
-      segment_id: 'domlur-01',
+      segment_id: 'domlur-01', start_lat: 12.9791, start_lng: 77.5913, end_lat: 12.9850, end_lng: 77.5950,
       report_text: 'Traffic is at a standstill for 20 mins',
       ai_category: 'traffic',
       ai_severity: 'medium',
@@ -66,7 +66,7 @@ export const seedDemoData = async () => {
     await setDoc(doc(reportsCollection, 'report-002'), report2);
 
     const report3 = {
-      segment_id: 'domlur-01',
+      segment_id: 'domlur-01', start_lat: 12.9791, start_lng: 77.5913, end_lat: 12.9850, end_lng: 77.5950,
       report_text: 'Accident blocking left lane',
       ai_category: 'accident',
       ai_severity: 'high',

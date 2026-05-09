@@ -105,7 +105,7 @@ export async function clearCommunityData() {
     const snapshot = await getDocs(colRef);
     const batch = writeBatch(db);
     snapshot.docs.forEach((doc) => {
-      batch.delete(doc.ref);
+      if (doc.id.startsWith("seg_")) batch.delete(doc.ref);
     });
     await batch.commit();
     console.log("Community data cleared successfully");

@@ -1,5 +1,5 @@
 import { db } from "../services/firebase";
-import { model } from "../config/gemini";
+import { model } from "../config/groq";
 import { safeGenerate } from "../utils/aiUtils";
 import { collection, getDocs, updateDoc, doc } from "firebase/firestore";
 import { getWeather, isRaining } from "../services/weatherService";

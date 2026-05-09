@@ -59,8 +59,8 @@ export function SegmentHeatmap() {
             positions={coords}
             pathOptions={{ 
               color, 
-              weight: 3, 
-              opacity: 0.4,
+              weight: 4, 
+              opacity: 0.6,
               lineCap: 'round',
               dashArray: score > 10 ? '1, 5' : null // Dashed for high preference
             }}
