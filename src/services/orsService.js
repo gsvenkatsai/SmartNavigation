@@ -165,21 +165,15 @@ export async function snapToRoad(lat, lng) {
  * Includes retry logic to reduce straight-line fallbacks.
  */
 export async function fetchSegmentGeometry(startLat, startLng, endLat, endLng) {
-  const url = `${ORS_BASE}/v2/directions/driving-car/geojson`;
+  const key = getApiKey();
+  const url = `${ORS_BASE}/v2/directions/driving-car?api_key=${key}&start=${startLng},${startLat}&end=${endLng},${endLat}`;
+  
   // Retry up to 3 times to minimize straight-line fallbacks
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': getApiKey(),
-          'Accept': 'application/json, application/geo+json'
-        },
-        body: JSON.stringify({
-          coordinates: [[startLng, startLat], [endLng, endLat]]
-        })
-      });
+      const res = await fetch(url);
+      console.log(`[ORS] attempt ${attempt + 1} status:`, res.status);
+      
       if (!res.ok) {
         if (attempt < 2) {
           await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
@@ -188,7 +182,9 @@ export async function fetchSegmentGeometry(startLat, startLng, endLat, endLng) {
         console.error(`[ORS] fetchSegmentGeometry failed: ${res.status}`);
         return null;
       }
+      
       const data = await res.json();
+      console.log("[ORS] response:", data);
       return data.features[0].geometry.coordinates.map(([lng, lat]) => [lat, lng]);
     } catch (err) {
       if (attempt < 2) {

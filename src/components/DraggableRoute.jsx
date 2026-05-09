@@ -124,6 +124,11 @@ export function DraggableRoute({
 
   const { data: sessionData } = useFirestoreDoc("sessions", sessionId);
 
+  useEffect(() => {
+    segmentCache.clear();
+  }, []);
+
+  // ── Sync pinned waypoints from Firestore (Guest view) ──────────────────────
   // ── Disable double-click zoom to prevent conflicts ─────────────────────────
   useEffect(() => {
     if (map) {

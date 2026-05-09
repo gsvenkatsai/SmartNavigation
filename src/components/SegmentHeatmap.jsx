@@ -28,7 +28,10 @@ export function SegmentHeatmap() {
   const { data: segments, loading } = useFirestoreCollection("segments");
   const [snapped, setSnapped] = useState({});
   const fetchingRef = useRef(false);
-
+  // At top of SegmentHeatmap component
+  useEffect(() => {
+      geoCache.clear();
+    }, []);
   useEffect(() => {
     if (!segments?.length) return;
     if (fetchingRef.current) return;
