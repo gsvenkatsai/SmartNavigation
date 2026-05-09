@@ -145,3 +145,14 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* ─── Pulsing animation for high-confidence heatmap segments ─── */
+@keyframes pulse-segment {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+
+.animate-pulse-segment {
+  animation: pulse-segment 2s ease-in-out infinite;
+}
+
