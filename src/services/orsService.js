@@ -10,17 +10,16 @@ const getApiKey = () => import.meta.env.VITE_ORS_API_KEY;
  * 1. Directions (Already used in DraggableRoute, but centralized here for logic)
  */
 export async function getDirections(waypoints) {
-  const url = `${ORS_BASE}/v2/directions/driving-car/geojson`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': getApiKey()
-    },
-    body: JSON.stringify({ coordinates: waypoints.map(w => [w.lng, w.lat]) })
-  });
-  if (!res.ok) throw new Error("ORS Directions failed");
-  return await res.json();
+  const key = getApiKey();
+  if (waypoints.length === 2) {
+    const [a, b] = waypoints;
+    const url = `${ORS_BASE}/v2/directions/driving-car?api_key=${key}&start=${a.lng},${a.lat}&end=${b.lng},${b.lat}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("ORS Directions failed");
+    return await res.json();
+  }
+  // Multi-waypoint: POST is required, use a backend proxy for 3+ waypoints
+  throw new Error("Multi-waypoint requires proxy — use 2-point GET for now");
 }
 
 /**
@@ -127,4 +126,18 @@ export async function snapToRoad(lat, lng) {
   const data = await res.json();
   const snapped = data.features[0].geometry.coordinates[0];
   return { lat: snapped[1], lng: snapped[0] };
+}
+
+
+export async function fetchSegmentGeometry(startLat, startLng, endLat, endLng) {
+  const key = getApiKey();
+  const url = `${ORS_BASE}/v2/directions/driving-car?api_key=${key}&start=${startLng},${startLat}&end=${endLng},${endLat}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.features[0].geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+  } catch {
+    return null;
+  }
 }

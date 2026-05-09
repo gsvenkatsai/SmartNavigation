@@ -329,14 +329,14 @@ export function MapView({ sessionId, isHost = true }) {
                   <div className="flex flex-col">
                     <span className="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Distance</span>
                     <span className="text-gray-100 text-sm font-semibold">
-                      {(routeSummary.totalDistance / 1000).toFixed(1)} km
+                      {routeSummary.totalDistance} km
                     </span>
                   </div>
                   <div className="w-px h-8 bg-gray-700" />
                   <div className="flex flex-col text-right">
                     <span className="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Est. Time</span>
                     <span className="text-indigo-400 text-sm font-semibold">
-                      {Math.round(routeSummary.totalTime / 60)} min
+                      {routeSummary.totalTime} min
                     </span>
                   </div>
                 </div>

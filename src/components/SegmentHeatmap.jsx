@@ -1,24 +1,18 @@
 // SegmentHeatmap.jsx — Community score overlay as colored polylines
-// Real-time integration with Firestore segments collection
-
+import { useState, useEffect, useRef } from "react";
 import { Polyline, Tooltip } from "react-leaflet";
 import { useFirestoreCollection } from "../hooks/useFirestore";
+import { fetchSegmentGeometry } from "../services/orsService";
 
-/**
- * Determine polyline color based on community score.
- * score = prefer_count - avoid_count
- */
+const geoCache = new Map();
+
 function getSegmentColor(preferCount = 0, avoidCount = 0) {
   const score = preferCount - avoidCount;
-  if (score > 10) return "#22c55e"; // green — community preferred
-  if (score > -5) return "#eab308";  // yellow — neutral
-  return "#ef4444";                  // red — community avoided
+  if (score > 10) return "#22c55e";
+  if (score > -5) return "#eab308";
+  return "#ef4444";
 }
 
-/**
- * Helper to parse segment ID back into coordinates if they aren't stored as fields
- * Format: seg_lat1_lng1_lat2_lng2
- */
 function getCoordsFromId(segmentId) {
   const parts = segmentId.split("_");
   if (parts.length === 5 && parts[0] === "seg") {
@@ -32,19 +26,60 @@ function getCoordsFromId(segmentId) {
 
 export function SegmentHeatmap() {
   const { data: segments, loading } = useFirestoreCollection("segments");
+  const [snapped, setSnapped] = useState({});
+  const fetchingRef = useRef(false);
+
+  useEffect(() => {
+    if (!segments?.length) return;
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+
+    async function fetchAll() {
+      for (const seg of segments) {
+        if (geoCache.has(seg.id)) {
+          setSnapped(prev => ({ ...prev, [seg.id]: geoCache.get(seg.id) }));
+          continue;
+        }
+        const rawCoords =
+          seg.start_lat && seg.start_lng && seg.end_lat && seg.end_lng
+            ? { startLat: seg.start_lat, startLng: seg.start_lng,
+                endLat: seg.end_lat,     endLng: seg.end_lng }
+            : (() => {
+                const c = getCoordsFromId(seg.segment_id);
+                return c ? { startLat: c[0][0], startLng: c[0][1],
+                             endLat: c[1][0],   endLng: c[1][1] }
+                         : null;
+              })();
+        if (!rawCoords) continue;
+
+        await new Promise(r => setTimeout(r, 800));
+
+        const positions = await fetchSegmentGeometry(
+          rawCoords.startLat, rawCoords.startLng,
+          rawCoords.endLat,   rawCoords.endLng
+        );
+        const final = positions ?? [
+          [rawCoords.startLat, rawCoords.startLng],
+          [rawCoords.endLat,   rawCoords.endLng],
+        ];
+        geoCache.set(seg.id, final);
+        setSnapped(prev => ({ ...prev, [seg.id]: final }));
+      }
+      fetchingRef.current = false;
+    }
+
+    fetchAll();
+  }, [segments]);
 
   if (loading) return null;
 
   return (
     <>
       {segments.map((seg) => {
-        // Try to get coords from fields, fallback to parsing ID
-        const coords = seg.start_lat && seg.start_lng && seg.end_lat && seg.end_lng
-          ? [
-              [seg.start_lat, seg.start_lng],
-              [seg.end_lat, seg.end_lng],
-            ]
-          : getCoordsFromId(seg.segment_id);
+        const coords = snapped[seg.id] ??
+          (seg.start_lat && seg.start_lng && seg.end_lat && seg.end_lng
+            ? [[seg.start_lat, seg.start_lng], [seg.end_lat, seg.end_lng]]
+            : getCoordsFromId(seg.segment_id));
 
         if (!coords) return null;
 
@@ -57,12 +92,12 @@ export function SegmentHeatmap() {
           <Polyline
             key={seg.id}
             positions={coords}
-            pathOptions={{ 
-              color, 
-              weight: 4, 
+            pathOptions={{
+              color,
+              weight: 4,
               opacity: 0.6,
-              lineCap: 'round',
-              dashArray: score > 10 ? '1, 5' : null // Dashed for high preference
+              lineCap: "round",
+              dashArray: score > 10 ? "1, 5" : null,
             }}
           >
             <Tooltip sticky>
@@ -74,7 +109,7 @@ export function SegmentHeatmap() {
                   <span className="text-green-400">✓ {preferCount} prefer</span>
                   <span className="text-red-400">✗ {avoidCount} avoid</span>
                 </div>
-                <div className={`mt-1 font-bold ${score >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                <div className={`mt-1 font-bold ${score >= 0 ? "text-green-400" : "text-red-400"}`}>
                   Score: {score}
                 </div>
                 {seg.confidence && (

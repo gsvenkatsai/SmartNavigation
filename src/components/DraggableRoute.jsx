@@ -1,19 +1,17 @@
-// DraggableRoute.jsx — True Drag-Based Route Shaping Implementation
-// Implements Google Maps style route dragging with hidden shaping points
-// Replaces the arbitrary waypoint system with a premium, road-constrained interaction
+// DraggableRoute.jsx — Multi-Waypoint Drag-Based Route Shaping
+// Segment-aware dragging: drag A→B reroutes only that segment, B→C unchanged.
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Polyline, Marker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import { extractSegmentsFromRoute } from "../utils/routeHelpers";
-import { getNearbyPOIs } from "../services/orsService";
+import { getNearbyPOIs, fetchSegmentGeometry } from "../services/orsService";
 import { useFirestoreDoc } from "../hooks/useFirestore";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "../services/firebase";
 
-const ORS_KEY = import.meta.env.VITE_ORS_API_KEY;
+// ─── Icons ────────────────────────────────────────────────────────────────────
 
-// Premium Icons
 const createMarkerIcon = (color, label) =>
   L.divIcon({
     className: "custom-marker",
@@ -31,18 +29,76 @@ const createMarkerIcon = (color, label) =>
 const startIcon = createMarkerIcon("#22c55e", "S");
 const endIcon   = createMarkerIcon("#ef4444", "D");
 
-// Ghost Shaping Point Icon
 const ghostIcon = L.divIcon({
   className: "shaping-point-ghost",
   html: `<div style="
     width:12px;height:12px;border-radius:50%;
-    background:rgba(99, 102, 241, 0.8);border:2px solid #fff;
-    box-shadow:0 0 15px rgba(99, 102, 241, 0.6);
-    cursor: grabbing;
+    background:rgba(99,102,241,0.8);border:2px solid #fff;
+    box-shadow:0 0 15px rgba(99,102,241,0.6);cursor:grabbing;
   "></div>`,
   iconSize: [12, 12],
   iconAnchor: [6, 6],
 });
+
+const pinnedIcon = L.divIcon({
+  className: "pinned-waypoint",
+  html: `<div style="
+    width:16px;height:16px;border-radius:50%;
+    background:#f59e0b;border:2px solid #fff;
+    box-shadow:0 0 10px rgba(245,158,11,0.7);cursor:grab;
+  "></div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+});
+
+// ─── Segment geometry cache ───────────────────────────────────────────────────
+const segmentCache = new Map();
+
+function segmentKey(a, b) {
+  return `${a.lat.toFixed(5)},${a.lng.toFixed(5)}|${b.lat.toFixed(5)},${b.lng.toFixed(5)}`;
+}
+
+async function fetchSegment(from, to) {
+  const key = segmentKey(from, to);
+  if (segmentCache.has(key)) return segmentCache.get(key);
+  const coords = await fetchSegmentGeometry(from.lat, from.lng, to.lat, to.lng);
+  if (!coords) {
+    const fallback = [[from.lat, from.lng], [to.lat, to.lng]];
+    segmentCache.set(key, fallback);
+    return fallback;
+  }
+  segmentCache.set(key, coords);
+  return coords;
+}
+
+// ─── Build full geometry from waypoints ──────────────────────────────────────
+async function buildRouteFromWaypoints(allWaypoints) {
+  const segmentGeoms = await Promise.all(
+    allWaypoints.slice(0, -1).map((wp, i) =>
+      fetchSegment(wp, allWaypoints[i + 1])
+    )
+  );
+  const fullGeometry = segmentGeoms.reduce((acc, seg, i) => {
+    return acc.concat(i === 0 ? seg : seg.slice(1));
+  }, []);
+  return { segments: segmentGeoms, fullGeometry };
+}
+
+function haversineDistance(a, b) {
+  const R = 6371;
+  const dLat = (b[0] - a[0]) * Math.PI / 180;
+  const dLng = (b[1] - a[1]) * Math.PI / 180;
+  const x = Math.sin(dLat/2) ** 2 +
+    Math.cos(a[0] * Math.PI/180) * Math.cos(b[0] * Math.PI/180) * Math.sin(dLng/2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+}
+
+function geometryDistance(coords) {
+  let d = 0;
+  for (let i = 0; i < coords.length - 1; i++) d += haversineDistance(coords[i], coords[i+1]);
+  return d;
+}
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export function DraggableRoute({
   source,
@@ -54,247 +110,211 @@ export function DraggableRoute({
   onSegmentDragged,
 }) {
   const map = useMap();
-  const [shapingPoint, setShapingPoint] = useState(null);
+
+  const [pinnedWaypoints, setPinnedWaypoints] = useState([]);
+  const [segmentGeoms, setSegmentGeoms] = useState([]);
+  const [fullGeometry, setFullGeometry] = useState([]);
+  const [dragging, setDragging] = useState(null);
   const [ghostPoint, setGhostPoint] = useState(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [geometry, setGeometry] = useState([]);
   const [pois, setPois] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState(null);
-  
-  const syncTimeoutRef = useRef(null);
-  const lastFetchedWpsRef = useRef("");
+
+  const lastWpStringRef = useRef("");
 
   const { data: sessionData } = useFirestoreDoc("sessions", sessionId);
 
-  // Sync shaping point from Firestore (for Guest view)
+  // ── Sync pinned waypoints from Firestore (Guest view) ──────────────────────
   useEffect(() => {
-    if (!isHost && sessionData?.shaping_point) {
-      setShapingPoint(sessionData.shaping_point);
+    if (!isHost && sessionData?.pinned_waypoints) {
+      try {
+        setPinnedWaypoints(JSON.parse(sessionData.pinned_waypoints));
+      } catch {}
     }
-  }, [isHost, sessionData?.shaping_point]);
+  }, [isHost, sessionData?.pinned_waypoints]);
 
-  // Handle Dragging Interactions
+  // ── All waypoints: source + pins + destination ─────────────────────────────
+  const allWaypoints = source && destination
+    ? [{ lat: source.lat, lng: source.lng }, ...pinnedWaypoints, { lat: destination.lat, lng: destination.lng }]
+    : [];
+
+  // ── Rebuild route ──────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!isDragging || !isHost) return;
+    if (!source || !destination) return;
+    const wpString = JSON.stringify(allWaypoints);
+    if (wpString === lastWpStringRef.current) return;
+    lastWpStringRef.current = wpString;
 
-    const onMouseMove = (e) => {
-      setGhostPoint(e.latlng);
-    };
+    setIsLoading(true);
+    setFetchError(null);
 
-    const onMouseUp = async (e) => {
-      setIsDragging(false);
-      const finalizedPoint = { lat: e.latlng.lat, lng: e.latlng.lng };
-      setShapingPoint(finalizedPoint);
+    buildRouteFromWaypoints(allWaypoints)
+      .then(({ segments, fullGeometry: fg }) => {
+        setSegmentGeoms(segments);
+        setFullGeometry(fg);
+        const totalKm = geometryDistance(fg);
+        onRouteReady?.({
+          totalDistance: totalKm.toFixed(1),
+          totalTime: Math.round((totalKm / 30) * 60),
+        });
+        onRouteUpdated?.(allWaypoints);
+        onSegmentDragged?.(extractSegmentsFromRoute(fg, 10));
+        if (fg.length > 0) map.fitBounds(fg, { padding: [50, 50], animate: true });
+        if (isHost && sessionId) {
+          updateDoc(doc(db, "sessions", sessionId), {
+            route_geometry: JSON.stringify(fg),
+            pinned_waypoints: JSON.stringify(pinnedWaypoints),
+          }).catch(console.error);
+        }
+      })
+      .catch((err) => {
+        console.error("[DraggableRoute] Route build failed:", err);
+        setFetchError("Route calculation failed. Try a different path.");
+      })
+      .finally(() => setIsLoading(false));
+  }, [source, destination, pinnedWaypoints]);
+
+  // ── Drag handlers ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (dragging === null || !isHost) return;
+
+    const onMouseMove = (e) => setGhostPoint(e.latlng);
+
+    const onMouseUp = (e) => {
+      const newPin = { lat: e.latlng.lat, lng: e.latlng.lng };
+      const segIdx = dragging.segmentIndex;
+      setDragging(null);
       setGhostPoint(null);
       map.dragging.enable();
-
-      // Commit to Firestore
-      if (sessionId) {
-        try {
-          const sessionRef = doc(db, "sessions", sessionId);
-          await updateDoc(sessionRef, {
-            shaping_point: finalizedPoint
-          });
-          console.log("[RouteShaper] Shaping point committed");
-        } catch (err) {
-          console.error("[RouteShaper] Sync failed:", err);
-        }
-      }
+      setPinnedWaypoints((prev) => {
+        const updated = [...prev];
+        updated.splice(segIdx, 0, newPin);
+        return updated;
+      });
     };
 
-    map.on('mousemove', onMouseMove);
-    map.on('mouseup', onMouseUp);
-
+    map.on("mousemove", onMouseMove);
+    map.on("mouseup", onMouseUp);
     return () => {
-      map.off('mousemove', onMouseMove);
-      map.off('mouseup', onMouseUp);
+      map.off("mousemove", onMouseMove);
+      map.off("mouseup", onMouseUp);
     };
-  }, [isDragging, isHost, map, sessionId]);
+  }, [dragging, isHost, map]);
 
-  // Fetch Route from ORS
+  // ── POIs around last pin ───────────────────────────────────────────────────
   useEffect(() => {
-    const API_KEY = import.meta.env.VITE_ORS_API_KEY;
-    if (!API_KEY || !source || !destination) return;
-
-    const waypoints = [
-      { lat: source.lat, lng: source.lng },
-      ...(shapingPoint ? [shapingPoint] : []),
-      { lat: destination.lat, lng: destination.lng }
-    ];
-
-    // Prevent duplicate fetches
-    const wpString = JSON.stringify(waypoints);
-    if (wpString === lastFetchedWpsRef.current) return;
-    lastFetchedWpsRef.current = wpString;
-
-    const fetchRoute = async () => {
-      setIsLoading(true);
-      setFetchError(null);
-      try {
-        const url = 'https://api.openrouteservice.org/v2/directions/driving-car/geojson';
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': API_KEY
-          },
-          body: JSON.stringify({
-            coordinates: waypoints.map(w => [w.lng, w.lat])
-          })
-        });
-
-        if (!res.ok) throw new Error(`ORS Error: ${res.status}`);
-
-        const data = await res.json();
-        const coords = data.features[0].geometry.coordinates.map(c => [c[1], c[0]]);
-        setGeometry(coords);
-
-        const summary = data.features[0].properties.summary;
-        onRouteReady?.({ totalDistance: summary.distance, totalTime: summary.duration });
-
-        if (coords.length > 0) {
-          map.fitBounds(coords, { padding: [50, 50], animate: true });
-        }
-
-        // ORS A-Z: POIs (Fetch nearby amenities for local context)
-        if (shapingPoint) {
-          try {
-            const poiData = await getNearbyPOIs(shapingPoint.lat, shapingPoint.lng);
-            setPois(poiData.features || []);
-          } catch (err) {
-            console.error("POI search failed:", err);
-          }
-        }
-
-        // Finalize state updates
-        onRouteUpdated?.(waypoints);
-        onSegmentDragged?.(extractSegmentsFromRoute(coords, 10)); // Extract segments from the actual road geometry
-
-        // Sync Geometry for Guest
-        if (isHost && sessionId) {
-          await updateDoc(doc(db, "sessions", sessionId), {
-            route_geometry: JSON.stringify(coords)
-          });
-        }
-      } catch (err) {
-        console.error("[RouteShaper] Fetch failed:", err);
-        setFetchError("Route calculation failed. Try a different path.");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchRoute();
-  }, [source, destination, shapingPoint, isHost, sessionId, map, onRouteReady, onRouteUpdated, onSegmentDragged]);
+    const lastPin = pinnedWaypoints[pinnedWaypoints.length - 1];
+    if (!lastPin) return;
+    getNearbyPOIs(lastPin.lat, lastPin.lng)
+      .then((d) => setPois(d.features || []))
+      .catch(() => {});
+  }, [pinnedWaypoints]);
 
   if (!source || !destination) return null;
 
+  const segColors = ["#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b"];
+
   return (
     <>
-      {/* Visual Error Message */}
       {fetchError && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[1000] bg-red-900/80 backdrop-blur text-white px-4 py-2 rounded-lg border border-red-500 text-xs shadow-xl">
           {fetchError}
         </div>
       )}
 
-      {/* Main Route Polyline */}
-      {geometry.length > 0 && (
-        <Polyline
-          positions={geometry}
-          pathOptions={{
-            color: "#6366f1",
-            weight: 6,
-            opacity: isDragging ? 0.3 : 0.85,
-            lineJoin: 'round'
-          }}
-          eventHandlers={{
-            mousedown: (e) => {
-              if (!isHost) return;
-              L.DomEvent.stopPropagation(e);
-              setIsDragging(true);
-              setGhostPoint(e.latlng);
-              map.dragging.disable();
-            },
-            mouseover: (e) => {
-              if (isHost) e.target.setStyle({ color: '#818cf8', weight: 8 });
-            },
-            mouseout: (e) => {
-              if (isHost) e.target.setStyle({ color: '#6366f1', weight: 6 });
-            }
-          }}
-        >
-          {isHost && !shapingPoint && (
-            <Tooltip permanent={false} direction="top" opacity={0.9}>
-              <span className="text-[10px] font-bold text-indigo-600">Drag route to reshape</span>
-            </Tooltip>
-          )}
-        </Polyline>
-      )}
-
-      {/* Ghost Preview during Drag */}
-      {isDragging && ghostPoint && (
-        <>
+      {segmentGeoms.map((segCoords, i) => {
+        const color = segColors[i % segColors.length];
+        const isDraggingThis = dragging?.segmentIndex === i;
+        return (
           <Polyline
-            positions={[
-              [source.lat, source.lng],
-              [ghostPoint.lat, ghostPoint.lng],
-              [destination.lat, destination.lng]
-            ]}
-            pathOptions={{
-              color: "#818cf8",
-              weight: 3,
-              dashArray: "10, 10",
-              opacity: 0.6
+            key={`seg-${i}-${segCoords.length}`}
+            positions={segCoords}
+            pathOptions={{ color, weight: 6, opacity: isDraggingThis ? 0.25 : 0.85, lineJoin: "round" }}
+            eventHandlers={{
+              mousedown: (e) => {
+                if (!isHost) return;
+                L.DomEvent.stopPropagation(e);
+                setDragging({ segmentIndex: i });
+                setGhostPoint(e.latlng);
+                map.dragging.disable();
+              },
+              mouseover: (e) => { if (isHost) e.target.setStyle({ color, weight: 9, opacity: 1 }); },
+              mouseout:  (e) => { if (isHost) e.target.setStyle({ color, weight: 6, opacity: 0.85 }); },
             }}
-          />
-          <Marker position={ghostPoint} icon={ghostIcon} />
-        </>
-      )}
+          >
+            {isHost && (
+              <Tooltip sticky direction="top" opacity={0.9}>
+                <span className="text-[10px] font-bold" style={{ color }}>
+                  Drag to reshape segment {i + 1}
+                </span>
+              </Tooltip>
+            )}
+          </Polyline>
+        );
+      })}
 
-      {/* ORS A-Z: Nearby POIs (Contextual Intelligence) */}
-      {pois.map((poi, i) => (
-        <Marker 
-          key={i} 
-          position={[poi.geometry.coordinates[1], poi.geometry.coordinates[0]]}
-          icon={L.divIcon({
-            className: "",
-            html: `<div style="background:#eab308;width:8px;height:8px;border-radius:50%;border:2px solid white;box-shadow:0 0 10px rgba(234, 179, 8, 0.6);"></div>`
-          })}
+      {dragging !== null && ghostPoint && (() => {
+        const fromWp = allWaypoints[dragging.segmentIndex];
+        const toWp   = allWaypoints[dragging.segmentIndex + 1];
+        if (!fromWp || !toWp) return null;
+        return (
+          <>
+            <Polyline
+              positions={[[fromWp.lat, fromWp.lng], [ghostPoint.lat, ghostPoint.lng], [toWp.lat, toWp.lng]]}
+              pathOptions={{ color: "#818cf8", weight: 3, dashArray: "10, 10", opacity: 0.7 }}
+            />
+            <Marker position={ghostPoint} icon={ghostIcon} />
+          </>
+        );
+      })()}
+
+      {isHost && pinnedWaypoints.map((wp, i) => (
+        <Marker
+          key={`pin-${i}`}
+          position={[wp.lat, wp.lng]}
+          icon={pinnedIcon}
+          draggable={true}
+          eventHandlers={{
+            dragend: (e) => {
+              const pos = e.target.getLatLng();
+              setPinnedWaypoints((prev) => {
+                const updated = [...prev];
+                updated[i] = { lat: pos.lat, lng: pos.lng };
+                return updated;
+              });
+            },
+            dblclick: () => {
+              setPinnedWaypoints((prev) => prev.filter((_, j) => j !== i));
+            },
+          }}
         >
-          <Tooltip direction="top" offset={[0, -5]}>
-            <span className="text-[10px] font-bold text-gray-200">Amenity: {poi.properties.label || "Service"}</span>
+          <Tooltip direction="top">
+            <span className="text-[10px] font-bold text-amber-400">
+              Waypoint {i + 1} — drag to move · double-click to remove
+            </span>
           </Tooltip>
         </Marker>
       ))}
 
-      {/* Origin & Destination Markers */}
+      {pois.map((poi, i) => (
+        <Marker
+          key={`poi-${i}`}
+          position={[poi.geometry.coordinates[1], poi.geometry.coordinates[0]]}
+          icon={L.divIcon({
+            className: "",
+            html: `<div style="background:#eab308;width:8px;height:8px;border-radius:50%;border:2px solid white;box-shadow:0 0 10px rgba(234,179,8,0.6);"></div>`,
+          })}
+        >
+          <Tooltip direction="top" offset={[0, -5]}>
+            <span className="text-[10px] font-bold text-gray-200">
+              Amenity: {poi.properties.label || "Service"}
+            </span>
+          </Tooltip>
+        </Marker>
+      ))}
+
       <Marker position={[source.lat, source.lng]} icon={startIcon} />
       <Marker position={[destination.lat, destination.lng]} icon={endIcon} />
-
-      {/* Hidden Shaping Point (Visible only as a subtle handle) */}
-      {shapingPoint && !isDragging && isHost && (
-        <Marker
-          position={[shapingPoint.lat, shapingPoint.lng]}
-          icon={ghostIcon}
-          draggable={true}
-          eventHandlers={{
-            dragstart: () => {
-              setIsDragging(true);
-              map.dragging.disable();
-            },
-            dragend: (e) => {
-              const pos = e.target.getLatLng();
-              setShapingPoint({ lat: pos.lat, lng: pos.lng });
-              setIsDragging(false);
-              map.dragging.enable();
-            }
-          }}
-        >
-           <Tooltip direction="bottom">Current shaping point</Tooltip>
-        </Marker>
-      )}
     </>
   );
 }
